@@ -67,8 +67,11 @@ namespace SnapTransOCR
                 if (args.Contains("--pin-text-only")) { PinTextTests.Run(Check); Console.WriteLine("PASS: " + assertions + " assertions"); return 0; }
                 if (args.Contains("--presentation-only")) { PresentationTests.Run(Check, Output); return 0; }
                 if (args.Contains("--render-only")) { RenderReferences(); Console.WriteLine("Rendered three reference layouts without opening desktop windows."); return 0; }
+                if (args.Contains("--history-window-only")) { HistoryStandaloneTests.Run(Check); Console.WriteLine("PASS: " + assertions + " standalone history assertions"); return 0; }
                 if (args.Contains("--history-clipboard-only"))
                 {
+                    if (System.Diagnostics.Process.GetProcessesByName("SnapTransOCR").Length != 0)
+                        throw new InvalidOperationException("请先从托盘退出正在运行的 SnapTransOCR，再执行剪贴板回归，避免测试内容进入真实历史。");
                     HistoryTests.Run(Check).GetAwaiter().GetResult();
                     ClipboardShortcutSettingsTests.Run(Check);
                     SevenDayHistoryTests.Run(Check).GetAwaiter().GetResult();
@@ -78,6 +81,7 @@ namespace SnapTransOCR
                     HistoryTests.RunUi(Check); HistoryFilterTests.Run(Check); HistoryThumbnailTests.Run(Check);
                     OptionalHotkeyTests.Run(Check); SettingsSaveTests.Run(Check);
                     HistoryRetentionSettingsTests.Run(Check);
+                    HistoryStandaloneTests.Run(Check);
                     ClipboardHistoryViewTests.Run(Check); ClipboardHistoryViewTests.RunUi(Check);
                     if (!headless) ClipboardHistoryTests.RunNative(Check).GetAwaiter().GetResult();
                     Console.WriteLine("PASS: " + assertions + " history/clipboard assertions"); return 0;
@@ -126,6 +130,7 @@ namespace SnapTransOCR
                 CaptureHistoryTests.Run(Check);
                 HistoryEditorTests.Run(Check);
                 HistoryWindowLifecycleTests.Run(Check);
+                HistoryStandaloneTests.Run(Check);
                 EditorPlacementTests.Run(Check);
                 ServiceSettingsTests();
                 ExtendedServiceSettingsTests.Run(Check); ConsolidatedTranslationSettingsTests.Run(Check);

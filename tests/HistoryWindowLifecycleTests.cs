@@ -47,8 +47,9 @@ namespace SnapTransOCR
         private static async Task Exercise(DesktopApp app, HistoryStore store, Action<bool, string> check)
         {
             Invoke(app, "ShowHistory");
-            var settings = Field<SettingsForm>(app, "settingsWindow");
-            var view = Field<HistoryView>(settings, "historyView");
+            var history = Field<HistoryForm>(app, "historyWindow");
+            var view = history.View;
+            check(Field<SettingsForm>(app, "settingsWindow") == null, "opening history creates a standalone window without opening settings");
             await view.RefreshAsync(); await Ready(view);
             var list = Field<ListBox>(view, "list"); var preview = Field<PictureBox>(view, "preview");
             var windows = Field<List<Form>>(app, "imageWindows");
@@ -59,8 +60,8 @@ namespace SnapTransOCR
             var second = windows.OfType<EditorForm>().Single(); Bitmap secondImage = CanvasImage(second);
             check(first.IsDisposed && Disposed(firstImage) && !ReferenceEquals(first, second) && secondImage.Size == new Size(180, 100),
                 "clicking a different history screenshot closes the previous editor and releases its source bitmap");
-            check(ReferenceEquals(Field<EditorForm>(app, "historyEditor"), second) && settings.Visible && settings.Enabled,
-                "history tracks only its current editor while settings remains usable");
+            check(ReferenceEquals(Field<EditorForm>(app, "historyEditor"), second) && history.Visible && history.Enabled,
+                "history tracks only its current editor while the standalone history window remains usable");
 
             await (Task)Invoke(app, "OpenEditor", Sample(90, 60, Color.Green), true);
             var ordinary = windows.OfType<EditorForm>().Single(item => item != second);
@@ -86,8 +87,8 @@ namespace SnapTransOCR
             Invoke(preview, "OnClick", EventArgs.Empty); await Ready(view);
             current = windows.OfType<EditorForm>().Single(item => item != ordinary);
             Button(current, "history").PerformClick();
-            check(current.IsDisposed && ReferenceEquals(Field<HistoryView>(settings, "historyView"), view) && settings.Visible,
-                "returning from a replacement editor reuses the same history page");
+            check(current.IsDisposed && ReferenceEquals(Field<HistoryForm>(app, "historyWindow").View, view) && history.Visible,
+                "returning from a replacement editor reuses the same standalone history window");
             Button(ordinary, "pin").PerformClick();
             check(ordinary.IsDisposed && windows.OfType<PinForm>().Count() == 2 && !windows.OfType<EditorForm>().Any(),
                 "pinning an ordinary editor also closes only that editor");

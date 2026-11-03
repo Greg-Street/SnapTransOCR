@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,6 +8,113 @@ using System.Windows.Forms;
 
 namespace SnapTransOCR
 {
+    internal sealed class HistoryButton : Button
+    {
+        internal bool Selected;
+        private readonly string glyph;
+        private bool hover;
+        internal HistoryButton(string text, string glyph, Action action)
+        {
+            Text = text; this.glyph = glyph; AccessibleName = text; AutoSize = false;
+            FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; Cursor = Cursors.Hand;
+            BackColor = Ui.Background; UseVisualStyleBackColor = false;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            Click += delegate { action(); };
+            MouseEnter += delegate { hover = true; Invalidate(); };
+            MouseLeave += delegate { hover = false; Invalidate(); };
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(BackColor); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            Color fill = Selected ? Color.FromArgb(232, 237, 255) : hover && Enabled ? Color.FromArgb(234, 235, 238) : Color.White;
+            Color ink = !Enabled ? Ui.Muted : Selected ? Ui.Accent : Ui.Ink;
+            using (var path = Shapes.Round(new RectangleF(.5f, .5f, Width - 1, Height - 1), Ui.Scale(this, 8)))
+            using (var brush = new SolidBrush(fill)) e.Graphics.FillPath(brush, path);
+            int size = Ui.Scale(this, 16), gap = Ui.Scale(this, 4);
+            int textWidth = TextRenderer.MeasureText(Text, Font, Size.Empty, TextFormatFlags.NoPadding).Width;
+            int inset = Math.Max(Ui.Scale(this, 4), (Width - textWidth - size - gap) / 2);
+            Glyphs.Draw(e.Graphics, glyph, new RectangleF(inset, (Height - size) / 2, size, size), ink);
+            TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(inset + size + gap, 0, Width - inset * 2 - size - gap, Height), ink,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+            if (Focused && ShowFocusCues)
+                using (var path = Shapes.Round(new RectangleF(2, 2, Width - 5, Height - 5), Ui.Scale(this, 6)))
+                using (var pen = new Pen(Color.FromArgb(149, 171, 242))) e.Graphics.DrawPath(pen, path);
+        }
+    }
+
+    internal sealed class HistoryForm : RoundedForm
+    {
+        internal readonly HistoryView View;
+        internal event Action SettingsRequested;
+        internal event Action<bool> PinChanged;
+        private readonly Label title, shortcut;
+        private readonly GlyphButton pin, settings, close;
+        private bool presented;
+        internal HistoryForm(HistoryStore store, bool recordingEnabled, bool pinned, string hotkey)
+        {
+            Text = "SnapTransOCR · 历史与剪贴板"; ClientSize = new Size(900, 620); MinimumSize = new Size(740, 480);
+            title = new Label { Text = "历史与剪贴板", AutoSize = true, Font = new Font("Microsoft YaHei UI", 12F), BackColor = Ui.Background };
+            shortcut = new Label { Text = hotkey ?? "", AutoSize = true, ForeColor = Ui.Muted, Font = new Font("Segoe UI", 9F), BackColor = Ui.Background };
+            pin = new GlyphButton("pin", "置顶历史窗口", delegate
+            {
+                TopMost = !TopMost; RefreshPin();
+                if (PinChanged != null) PinChanged(TopMost);
+            });
+            settings = new GlyphButton("settings", "打开设置", delegate { if (SettingsRequested != null) SettingsRequested(); });
+            close = new GlyphButton("close", "关闭历史窗口（Esc）", Close);
+            View = new HistoryView(store, recordingEnabled);
+            Controls.AddRange(new Control[] { title, shortcut, pin, settings, close, View });
+            MouseDown += DragHeader; title.MouseDown += DragHeader; shortcut.MouseDown += DragHeader;
+            TopMost = pinned; RefreshPin(); ResumeLayout(true);
+        }
+        private void DragHeader(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left && e.Y < Ui.Scale(this, 54)) Shapes.Drag(this); }
+        private void RefreshPin() { pin.Selected = TopMost; pin.SetHint(TopMost ? "取消置顶历史窗口" : "置顶历史窗口"); pin.Invalidate(); }
+        internal void RefreshShortcut(string hotkey) { shortcut.Text = hotkey ?? ""; PerformLayout(); }
+        internal void Present()
+        {
+            if (!presented)
+            {
+                presented = true;
+                if (Ui.RenderOffscreen) { StartPosition = FormStartPosition.Manual; Location = new Point(-30000, -30000); }
+                else
+                {
+                    Rectangle work = Screen.FromPoint(Cursor.Position).WorkingArea;
+                    MinimumSize = new Size(Math.Min(MinimumSize.Width, work.Width), Math.Min(MinimumSize.Height, work.Height));
+                    Size size = new Size(Math.Min(Width, work.Width), Math.Min(Height, work.Height));
+                    StartPosition = FormStartPosition.Manual;
+                    Bounds = new Rectangle(work.Left + (work.Width - size.Width) / 2, work.Top + (work.Height - size.Height) / 2, size.Width, size.Height);
+                }
+            }
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            Show(); Activate(); View.RefreshEntries(); View.FocusSearch();
+        }
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            base.OnLayout(e);
+            if (View == null) return;
+            int margin = Ui.Scale(this, 18), button = Ui.Scale(this, 32), top = Ui.Scale(this, 12);
+            title.Location = new Point(Ui.Scale(this, 48), top + Ui.Scale(this, 3));
+            shortcut.Location = new Point(title.Right + Ui.Scale(this, 16), top + Ui.Scale(this, 7));
+            close.SetBounds(ClientSize.Width - margin - button, top, button, button);
+            settings.SetBounds(close.Left - button - Ui.Scale(this, 6), top, button, button);
+            pin.SetBounds(settings.Left - button - Ui.Scale(this, 6), top, button, button);
+            View.SetBounds(margin, Ui.Scale(this, 62), Math.Max(1, ClientSize.Width - margin * 2), Math.Max(1, ClientSize.Height - Ui.Scale(this, 76)));
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            int size = Ui.Scale(this, 22);
+            Glyphs.Draw(e.Graphics, "history", new RectangleF(Ui.Scale(this, 18), Ui.Scale(this, 18), size, size), Ui.Accent);
+        }
+        protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+        {
+            if (keyData == Keys.Escape) { Close(); return true; }
+            if (keyData == (Keys.Control | Keys.F)) { View.FocusSearch(); return true; }
+            return base.ProcessCmdKey(ref message, keyData);
+        }
+        protected override void OnDpiChanged(DpiChangedEventArgs e) { base.OnDpiChanged(e); PerformLayout(); }
+    }
+
     internal sealed class HistoryView : UserControl
     {
         public event Action<bool> RecordingChanged;
@@ -15,7 +123,8 @@ namespace SnapTransOCR
         private readonly ListBox list;
         private readonly TextBox search;
         private readonly TextInputField searchField;
-        private readonly ComboBox typeFilter;
+        private readonly HistoryButton[] filterButtons;
+        private int filterIndex;
         private readonly RichTextBox source, translation;
         private readonly Label sourceTitle, translationTitle, captureSummary, previewTitle, status, storagePath, recordingLabel, empty;
         private readonly RoundedPanel listPanel, sourcePanel, translationPanel, previewPanel;
@@ -23,7 +132,8 @@ namespace SnapTransOCR
         private readonly Panel actions;
         private readonly ToggleSwitch recording;
         private readonly GlyphButton copySource, copyTranslation;
-        private readonly Button copySelected, remove, clear;
+        private readonly Button copySelected, remove, clear, openImage;
+        private readonly Font metadataFont = new Font("Microsoft YaHei UI", 8.5F);
         private readonly System.Windows.Forms.Timer refreshTimer;
         private readonly ToolTip storageHint;
         private volatile bool storeDirty;
@@ -45,9 +155,16 @@ namespace SnapTransOCR
             recording.CheckedChanged += delegate { if (!refreshing && RecordingChanged != null) RecordingChanged(recording.Checked); };
             search = new TextBox { Font = Ui.Font, ForeColor = Ui.Ink, MaxLength = 512, AccessibleName = "搜索历史原文或译文" };
             search.HandleCreated += delegate { SendMessage(search.Handle, 0x1501, new IntPtr(1), "搜索原文或译文"); }; // EM_SETCUEBANNER
-            searchField = new TextInputField(search);
-            typeFilter = Ui.Combo(new[] { "全部", "截图", "OCR", "翻译", "剪贴板", "文字", "图片" }, 0);
-            typeFilter.AccessibleName = "历史类型筛选";
+            searchField = new TextInputField(search, "search", true);
+            string[] types = { "全部", "截图", "OCR", "翻译", "剪贴板", "文字", "图片" };
+            string[] icons = { "general", "crop", "ocr", "translate", "paste", "text", "image" };
+            filterButtons = new HistoryButton[types.Length];
+            for (int i = 0; i < types.Length; i++)
+            {
+                int index = i;
+                filterButtons[i] = new HistoryButton(types[i], icons[i], delegate { SelectFilter(index); }) { Selected = i == 0, AccessibleName = "筛选" + types[i] };
+                Controls.Add(filterButtons[i]);
+            }
             listPanel = new RoundedPanel { Radius = 12, Fill = Color.White };
             sourcePanel = new RoundedPanel { Radius = 12, Fill = Color.White, BorderColor = Color.FromArgb(226, 226, 229) };
             translationPanel = new RoundedPanel { Radius = 12, Fill = Color.White, BorderColor = Color.FromArgb(226, 226, 229) };
@@ -55,6 +172,7 @@ namespace SnapTransOCR
             actions = new Panel { BackColor = Ui.Background };
             list = new ListBox { BorderStyle = BorderStyle.None, BackColor = Color.White, IntegralHeight = false, HorizontalScrollbar = false, DrawMode = DrawMode.OwnerDrawFixed, AccessibleName = "历史与剪贴板" };
             list.DrawItem += DrawEntry;
+            list.DoubleClick += async delegate { await CopySelected(); };
             list.SelectedIndexChanged += delegate
             {
                 if (updatingEntries) return;
@@ -64,6 +182,7 @@ namespace SnapTransOCR
             list.KeyDown += async delegate(object sender, KeyEventArgs e)
             {
                 if (e.Control && e.KeyCode == Keys.C) { e.Handled = e.SuppressKeyPress = true; await CopySelected(); }
+                else if (e.KeyData == Keys.Delete && Selected != null) { e.Handled = e.SuppressKeyPress = true; string id = Selected.Id; await Change(delegate { return store.DeleteAsync(id); }); }
             };
             empty = new Label { Text = "暂无历史记录", ForeColor = Ui.Muted, BackColor = Color.White, TextAlign = ContentAlignment.MiddleCenter };
             sourceTitle = Ui.Label("原文"); translationTitle = Ui.Label("译文");
@@ -75,9 +194,10 @@ namespace SnapTransOCR
             source = TextArea("历史原文"); translation = TextArea("历史译文");
             copySource = new GlyphButton("copy", "复制全部原文", async delegate { await Copy(source.Text); }) { BackColor = Color.White };
             copyTranslation = new GlyphButton("copy", "复制全部译文", async delegate { await Copy(translation.Text); }) { BackColor = Color.White };
-            copySelected = Ui.TextAction("复制", async delegate { await CopySelected(); });
-            remove = Ui.TextAction("删除", async delegate { HistoryEntry entry = Selected; if (entry != null) await Change(delegate { return store.DeleteAsync(entry.Id); }); });
-            clear = Ui.TextAction("清空全部", async delegate { await Change(store.ClearAsync); });
+            copySelected = new HistoryButton("复制", "copy", async delegate { await CopySelected(); });
+            remove = new HistoryButton("删除", "trash", async delegate { HistoryEntry entry = Selected; if (entry != null) await Change(delegate { return store.DeleteAsync(entry.Id); }); });
+            clear = new HistoryButton("清空全部", "trash", async delegate { await Change(store.ClearAsync); });
+            openImage = new HistoryButton("编辑图片", "image", async delegate { await ShowImage(); });
             status = new Label { Text = "保留 " + store.ActiveRetentionDays + " 天；过期自动清理", ForeColor = Ui.Muted, BackColor = Color.Transparent, AutoEllipsis = true };
             storagePath = new Label { Text = "存储：" + store.DirectoryPath, AccessibleName = "历史存储目录：" + store.DirectoryPath, ForeColor = Ui.Muted, BackColor = Color.Transparent, AutoEllipsis = true };
             storageHint = new ToolTip(); storageHint.SetToolTip(storagePath, store.DirectoryPath);
@@ -85,14 +205,21 @@ namespace SnapTransOCR
             sourcePanel.Controls.AddRange(new Control[] { sourceTitle, source, copySource });
             translationPanel.Controls.AddRange(new Control[] { translationTitle, translation, copyTranslation });
             previewPanel.Controls.AddRange(new Control[] { previewTitle, preview, captureSummary });
-            actions.Controls.Add(copySelected); actions.Controls.Add(remove);
-            Controls.AddRange(new Control[] { recordingLabel, recording, searchField, typeFilter, listPanel, sourcePanel, translationPanel, previewPanel, actions, clear, status, storagePath });
+            actions.Controls.Add(copySelected); actions.Controls.Add(remove); actions.Controls.Add(openImage);
+            Controls.AddRange(new Control[] { recordingLabel, recording, searchField, listPanel, sourcePanel, translationPanel, previewPanel, actions, clear, status, storagePath });
             search.TextChanged += delegate { ApplyFilter(); };
-            typeFilter.SelectionChangeCommitted += delegate { ApplyFilter(); };
             refreshTimer = new System.Windows.Forms.Timer { Interval = 180 };
             refreshTimer.Tick += delegate { refreshTimer.Stop(); if (storeDirty && !closing && Visible) RefreshEntries(); };
             store.Changed += StoreChanged;
             ResumeLayout(true); LayoutContent(); ShowSelected();
+        }
+        internal void FocusSearch() { search.Focus(); search.SelectAll(); }
+        internal int FilterIndex { get { return filterIndex; } }
+        private void SelectFilter(int index)
+        {
+            filterIndex = index;
+            for (int i = 0; i < filterButtons.Length; i++) { filterButtons[i].Selected = i == index; filterButtons[i].Invalidate(); }
+            ApplyFilter();
         }
         internal void RefreshRecording(bool enabled) { refreshing = true; recording.Checked = enabled; refreshing = false; }
         internal async void RefreshEntries() { await RefreshAsync(); }
@@ -132,7 +259,7 @@ namespace SnapTransOCR
             if (closing) return;
             if (Selected != null) selectedId = Selected.Id;
             string query = search.Text.Trim();
-            int type = typeFilter.SelectedIndex;
+            int type = filterIndex;
             HistoryEntry[] matches = Array.FindAll(entries, item => MatchesFilter(item, type, query));
             list.BeginUpdate(); updatingEntries = true;
             try
@@ -265,14 +392,18 @@ namespace SnapTransOCR
             copySelected.Text = entry != null && !String.IsNullOrEmpty(entry.ImageFile) ? "复制图片" : "复制文字";
             copySelected.Enabled = !busy && entry != null;
             remove.Enabled = !busy && entry != null;
+            openImage.Visible = entry != null && !String.IsNullOrEmpty(entry.ImageFile);
+            openImage.Enabled = !busy && entry != null;
             LayoutContent();
             RefreshPreview();
         }
         private void SetBusy(bool value)
         {
-            busy = value; list.Enabled = clear.Enabled = search.Enabled = typeFilter.Enabled = !value;
+            busy = value; list.Enabled = clear.Enabled = search.Enabled = !value;
+            foreach (var button in filterButtons) button.Enabled = !value;
             copySelected.Enabled = !value && Selected != null;
             remove.Enabled = !value && Selected != null;
+            openImage.Enabled = !value && Selected != null;
             if (!value && refreshPending && IsHandleCreated) { refreshPending = false; BeginInvoke(new Action(RefreshEntries)); }
         }
         private static RichTextBox TextArea(string name)
@@ -287,18 +418,25 @@ namespace SnapTransOCR
         {
             if (e.Index < 0) return;
             var entry = (HistoryEntry)list.Items[e.Index];
-            Color background = (e.State & DrawItemState.Selected) != 0 ? Color.FromArgb(232, 237, 255) : Color.White;
-            using (var brush = new SolidBrush(background)) e.Graphics.FillRectangle(brush, e.Bounds);
+            bool selected = (e.State & DrawItemState.Selected) != 0;
+            e.Graphics.FillRectangle(Brushes.White, e.Bounds);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            if (selected)
+                using (var path = Shapes.Round(new RectangleF(e.Bounds.X + S(2), e.Bounds.Y + S(2), e.Bounds.Width - S(4), e.Bounds.Height - S(4)), S(8)))
+                using (var brush = new SolidBrush(Color.FromArgb(232, 237, 255))) e.Graphics.FillPath(brush, path);
             string kind = KindLabel(entry);
-            string title = entry.CreatedUtc.ToLocalTime().ToString("MM-dd HH:mm") + " · " + kind;
+            string glyph = entry.Kind == "capture" ? "crop" : entry.Kind == "clipboard_image" ? "image" : entry.Kind == "clipboard_text" ? "paste" : entry.Kind == "ocr" ? "ocr" : "translate";
             string text = String.IsNullOrWhiteSpace(entry.Source) ? entry.Translation ?? "" : entry.Source;
             if (entry.Kind == "capture") text = "PNG 截图";
             else if (entry.Kind == "clipboard_image") text = "剪贴板图片";
             if (text.Length > 150) text = text.Substring(0, 150);
             text = text.Replace('\r', ' ').Replace('\n', ' ');
             const TextFormatFlags flags = TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
-            TextRenderer.DrawText(e.Graphics, title, Font, new Rectangle(e.Bounds.X + S(10), e.Bounds.Y + S(6), e.Bounds.Width - S(20), S(24)), Ui.Muted, flags);
-            TextRenderer.DrawText(e.Graphics, text, Font, new Rectangle(e.Bounds.X + S(10), e.Bounds.Y + S(31), e.Bounds.Width - S(20), S(25)), Ui.Ink, flags);
+            Glyphs.Draw(e.Graphics, glyph, new RectangleF(e.Bounds.X + S(10), e.Bounds.Y + S(10), S(16), S(16)), selected ? Ui.Accent : Ui.Muted);
+            TextRenderer.DrawText(e.Graphics, kind, metadataFont, new Rectangle(e.Bounds.X + S(31), e.Bounds.Y + S(8), e.Bounds.Width - S(119), S(22)), selected ? Ui.Accent : Ui.Muted, flags);
+            TextRenderer.DrawText(e.Graphics, entry.CreatedUtc.ToLocalTime().ToString("MM-dd HH:mm"), metadataFont,
+                new Rectangle(e.Bounds.Right - S(87), e.Bounds.Y + S(8), S(79), S(22)), Ui.Muted, flags | TextFormatFlags.Right);
+            TextRenderer.DrawText(e.Graphics, text, Font, new Rectangle(e.Bounds.X + S(10), e.Bounds.Y + S(34), e.Bounds.Width - S(20), S(26)), Ui.Ink, flags);
         }
         internal static string KindLabel(HistoryEntry entry)
         {
@@ -318,34 +456,52 @@ namespace SnapTransOCR
         private void LayoutContent()
         {
             if (status == null) return;
-            int width = ClientSize.Width, height = ClientSize.Height, side = Math.Min(S(235), width / 3), details = width - side - S(12);
-            recordingLabel.Location = new Point(0, S(10)); recording.SetBounds(S(90), S(5), S(44), S(26));
-            clear.SetBounds(width - S(92), 0, S(92), S(32));
-            typeFilter.SetBounds(clear.Left - S(112), 0, S(100), S(34));
-            searchField.SetBounds(S(146), 0, Math.Max(1, typeFilter.Left - S(158)), S(34));
+            int width = ClientSize.Width, height = ClientSize.Height, side = Math.Min(S(260), width / 3), details = width - side - S(12);
+            clear.SetBounds(width - S(110), 0, S(110), S(34));
+            recording.SetBounds(clear.Left - S(58), S(4), S(44), S(26));
+            recordingLabel.Location = new Point(recording.Left - S(70), S(7));
+            searchField.SetBounds(0, 0, Math.Max(1, recordingLabel.Left - S(16)), S(34));
+            int x = 0, filterTop = S(46), filterHeight = S(34), gap = S(6);
+            int textWidth = 0;
+            foreach (var button in filterButtons) textWidth += TextRenderer.MeasureText(button.Text, button.Font, Size.Empty, TextFormatFlags.NoPadding).Width;
+            int buttonPadding = Math.Max(S(30), Math.Min(S(42), (width - gap * (filterButtons.Length - 1) - textWidth) / filterButtons.Length));
+            foreach (var button in filterButtons)
+            {
+                int buttonWidth = TextRenderer.MeasureText(button.Text, button.Font, Size.Empty, TextFormatFlags.NoPadding).Width + buttonPadding;
+                if (x > 0 && x + buttonWidth > width) { x = 0; filterTop += filterHeight + gap; }
+                button.SetBounds(x, filterTop, buttonWidth, filterHeight); x += buttonWidth + gap;
+            }
+            int contentTop = filterTop + filterHeight + S(12);
             bool capture = ImageOnly(Selected);
             bool thumbnail = Selected != null && !String.IsNullOrEmpty(Selected.ImageFile);
-            int available = height - S(80), previewHeight = !capture && thumbnail ? Math.Min(S(160), Math.Max(S(84), available / 4)) : 0;
-            listPanel.SetBounds(0, S(44), side, available);
-            list.SetBounds(S(6), S(6), side - S(12), listPanel.Height - S(12)); list.ItemHeight = S(64);
-            empty.Bounds = list.Bounds;
             bool single = capture || Selected != null && (Selected.Kind == "clipboard_text" || (Selected.Kind == "ocr" && String.IsNullOrEmpty(Selected.Translation)));
-            int detailHeight = available - S(42), top = S(44) + (previewHeight > 0 ? previewHeight + S(12) : 0);
-            int textHeight = detailHeight - (top - S(44)), part = (textHeight - S(14)) / 2;
+            int available = Math.Max(S(80), height - contentTop - S(36)), previewHeight = !capture && thumbnail ? Math.Min(S(160), Math.Max(S(84), available / 4)) : 0;
+            if (previewHeight > 0)
+            {
+                int cardMinimum = S(64) + Math.Max(source.Font.Height, translation.Font.Height);
+                int textMinimum = single ? cardMinimum : cardMinimum * 2 + S(14);
+                previewHeight = Math.Max(0, Math.Min(previewHeight, available - S(54) - textMinimum));
+            }
+            listPanel.SetBounds(0, contentTop, side, available);
+            list.SetBounds(S(6), S(6), side - S(12), listPanel.Height - S(12)); list.ItemHeight = S(72);
+            empty.Bounds = list.Bounds;
+            int detailHeight = available - S(42), top = contentTop + (previewHeight > 0 ? previewHeight + S(12) : 0);
+            int textHeight = detailHeight - (top - contentTop), part = (textHeight - S(14)) / 2;
             sourcePanel.SetBounds(side + S(12), top, details, single ? textHeight : part);
             translationPanel.SetBounds(sourcePanel.Left, sourcePanel.Bottom + S(14), details, textHeight - part - S(14));
             actions.SetBounds(sourcePanel.Left, (single ? sourcePanel.Bottom : translationPanel.Bottom) + S(8), details, S(34));
             sourceTitle.Location = new Point(S(14), S(10)); copySource.SetBounds(details - S(44), S(4), S(32), S(32));
             source.SetBounds(S(14), S(42), details - S(28), Math.Max(1, sourcePanel.Height - S(56)));
-            previewPanel.Bounds = capture ? sourcePanel.Bounds : new Rectangle(sourcePanel.Left, S(44), details, previewHeight);
+            previewPanel.Bounds = capture ? sourcePanel.Bounds : new Rectangle(sourcePanel.Left, contentTop, details, previewHeight);
             previewTitle.Text = capture ? (Selected.Kind == "clipboard_image" ? "图片 · 单击放大" : "截图 · 单击放大") : "截图预览\n单击放大";
             previewTitle.Location = new Point(S(14), capture ? S(10) : Math.Max(S(10), (previewHeight - previewTitle.Height) / 2));
             preview.SetBounds(capture ? S(10) : S(100), capture ? S(36) : S(10), Math.Max(1, previewPanel.Width - (capture ? S(20) : S(110))), Math.Max(1, previewPanel.Height - (capture ? S(46) : S(20))));
             captureSummary.Bounds = preview.Bounds;
             translationTitle.Location = new Point(S(14), S(10)); copyTranslation.SetBounds(details - S(44), S(4), S(32), S(32));
             translation.SetBounds(S(14), S(42), details - S(28), Math.Max(1, translationPanel.Height - S(56)));
-            remove.SetBounds(details - S(62), 0, S(62), S(34));
-            copySelected.SetBounds(details - S(160), 0, S(88), S(34));
+            remove.SetBounds(details - S(80), 0, S(80), S(34));
+            copySelected.SetBounds(remove.Left - S(120), 0, S(112), S(34));
+            openImage.SetBounds(0, 0, S(112), S(34));
             status.SetBounds(0, height - S(28), width / 2, S(28));
             storagePath.SetBounds(width / 2, height - S(28), width - width / 2, S(28));
         }
@@ -365,7 +521,7 @@ namespace SnapTransOCR
             if (disposing && list != null)
             {
                 closing = true;
-                store.Changed -= StoreChanged; refreshTimer.Dispose(); storageHint.Dispose();
+                store.Changed -= StoreChanged; refreshTimer.Dispose(); storageHint.Dispose(); metadataFont.Dispose();
                 if (previewRequest != null) { previewRequest.Cancel(); previewRequest = null; }
                 SetPreview(null); entries = new HistoryEntry[0]; list.Items.Clear(); source.Clear(); translation.Clear();
             }

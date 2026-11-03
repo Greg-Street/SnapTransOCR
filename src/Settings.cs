@@ -93,8 +93,8 @@ namespace SnapTransOCR
             CaptureTextSize = 24;
             HistoryEnabled = true;
             HistoryRetentionDays = 7;
-            HistoryShortcutVersion = 1;
-            Hotkeys = new[] { "Alt+1", "", "", "Ctrl+Shift+A", "", "", "", "Ctrl+Alt+V", "" };
+            HistoryShortcutVersion = 2;
+            Hotkeys = new[] { "Alt+1", "", "", "Ctrl+Shift+A", "", "", "", "Ctrl+Shift+S", "" };
         }
 
         public AppSettings Copy()
@@ -281,13 +281,15 @@ namespace SnapTransOCR
                 AppSettings settings = Json.Read<AppSettings>(json);
                 if (settings == null) throw new FormatException();
                 settings.NormalizeHotkeys();
-                if (!Json.Object(json).ContainsKey("HistoryShortcutVersion") && String.IsNullOrWhiteSpace(settings.Hotkeys[7]))
+                if ((!Json.Object(json).ContainsKey("HistoryShortcutVersion") && String.IsNullOrWhiteSpace(settings.Hotkeys[7]))
+                    || (settings.HistoryShortcutVersion < 2 && String.Equals(settings.Hotkeys[7], "Ctrl+Alt+V", StringComparison.OrdinalIgnoreCase)))
                 {
-                    settings.Hotkeys[7] = "Ctrl+Alt+V";
+                    string previous = settings.Hotkeys[7];
+                    settings.Hotkeys[7] = "Ctrl+Shift+S";
                     try { Hotkey.Validate(settings.Hotkeys); }
-                    catch (FormatException) { settings.Hotkeys[7] = ""; }
+                    catch (FormatException) { settings.Hotkeys[7] = previous; }
                 }
-                settings.HistoryShortcutVersion = 1;
+                settings.HistoryShortcutVersion = 2;
                 if (settings.HistoryRetentionDays < 1 || settings.HistoryRetentionDays > 3650) settings.HistoryRetentionDays = 7;
                 settings.NormalizeProviders();
                 return settings;

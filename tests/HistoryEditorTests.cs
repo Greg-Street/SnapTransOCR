@@ -59,9 +59,8 @@ namespace SnapTransOCR
             string originalPath = Path.Combine(directory, original.ImageFile);
             byte[] originalPng = File.ReadAllBytes(originalPath);
             Invoke(app, "ShowHistory");
-            var settings = Field<SettingsForm>(app, "settingsWindow");
-            settings.StartPosition = FormStartPosition.Manual; settings.Location = new Point(-30000, -30000);
-            var view = Field<HistoryView>(settings, "historyView");
+            var history = Field<HistoryForm>(app, "historyWindow");
+            var view = history.View;
             await Ready(view);
             var preview = Field<PictureBox>(view, "preview");
             var windows = Field<List<Form>>(app, "imageWindows");
@@ -74,8 +73,8 @@ namespace SnapTransOCR
             check((await store.LoadAsync()).Length == 1 && Field<HashSet<Task>>(app, "historyWrites").Count == 0 && handler.OcrCalls == 0 && handler.TranslateCalls == 0,
                 "opening a historical screenshot queues no duplicate capture record and sends no OCR or translation request");
             check(canvas.Stroke == 8, "the history editor starts with the configured screenshot stroke width");
-            check(editor.Owner == null && !editor.TopMost && settings.Enabled,
-                "history editing leaves settings independently accessible instead of keeping an owned topmost window above it");
+            check(editor.Owner == null && !editor.TopMost && history.Enabled,
+                "history editing leaves the independent history window accessible instead of keeping an owned topmost editor above it");
             Annotate(canvas);
             using (var rendered = canvas.Render())
             using (var png = new MemoryStream())
@@ -90,7 +89,7 @@ namespace SnapTransOCR
             canvas.Redo(); canvas.Redo();
             using (var redone = canvas.Render()) check(redone.Size == new Size(100, 70) && Blue(redone.GetPixel(0, 20)), "redo restores the edited crop before export");
             editor.Controls.OfType<FlowLayoutPanel>().SelectMany(bar => bar.Controls.OfType<GlyphButton>()).Single(button => button.Glyph == "history").PerformClick();
-            check(settings.Visible && !settings.IsDisposed && Field<HistoryView>(settings, "historyView") == view,
+            check(history.Visible && !history.IsDisposed && history.View == view,
                 "return-to-history closes the editor and restores the same history page without recreating its view");
             check(editor.IsDisposed && Disposed(owned) && windows.Count == 0 && File.ReadAllBytes(originalPath).SequenceEqual(originalPng) && (await store.LoadAsync()).Length == 1,
                 "closing a history editor releases its bitmap and leaves the original PNG and record unchanged");

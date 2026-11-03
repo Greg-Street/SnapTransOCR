@@ -20,7 +20,7 @@ namespace SnapTransOCR
         {
             var defaults = new AppSettings();
             check(defaults.Hotkeys.Length == 9 && defaults.Hotkeys[0] == "Alt+1" && defaults.Hotkeys[3] == "Ctrl+Shift+A"
-                && defaults.Hotkeys[7] == "Ctrl+Alt+V" && new[] { 4, 5, 6, 8 }.All(index => String.IsNullOrEmpty(defaults.Hotkeys[index])), "history shortcut defaults to Ctrl+Alt+V while other optional commands stay unassigned");
+                && defaults.Hotkeys[7] == "Ctrl+Shift+S" && new[] { 4, 5, 6, 8 }.All(index => String.IsNullOrEmpty(defaults.Hotkeys[index])), "history shortcut defaults to Ctrl+Shift+S while other optional commands stay unassigned");
             string directory = Path.Combine(Path.GetTempPath(), "SnapTransOCR-hotkeys-" + Guid.NewGuid().ToString("N"));
             string path = Path.Combine(directory, "settings.json");
             try
@@ -120,8 +120,11 @@ namespace SnapTransOCR
                                     check(Field<HashSet<PinForm>>(app, "hiddenPins").Count == 0, "toggle with no existing pins has no retained state");
 
                                     Command(app, 7);
+                                    var historyWindow = Field<HistoryForm>(app, "historyWindow");
+                                    check(historyWindow.Visible && Field<SettingsForm>(app, "settingsWindow") == null, "the history command opens its independent window without settings");
+                                    Invoke(app, "ShowSettings");
                                     var options = Field<SettingsForm>(app, "settingsWindow");
-                                    check(options.Visible && Field<Label>(options, "pageTitle").Text == "历史记录", "the history command opens the existing settings history page");
+                                    check(options.Visible && historyWindow.Visible, "settings and the history window remain independently usable");
                                     var fields = Field<Dictionary<string, TextBox>>(options, "fields");
                                     check(Enumerable.Range(0, 9).All(index => fields.ContainsKey("hotkey" + index)), "settings exposes all original and optional shortcut fields");
                                     await Styles(app, options, saved, check, () => failSave = true, () => failSave = false);

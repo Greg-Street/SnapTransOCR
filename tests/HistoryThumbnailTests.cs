@@ -134,7 +134,7 @@ namespace SnapTransOCR
             var list = Field<RoundedPanel>(view, "listPanel");
             var source = Field<RichTextBox>(view, "source"); var translation = Field<RichTextBox>(view, "translation");
             bool capture = ((HistoryEntry)Field<ListBox>(view, "list").SelectedItem).Kind == "capture";
-            check(view.ClientRectangle.Contains(panel.Bounds) && panel.ClientRectangle.Contains(preview.Bounds) && panel.Left >= list.Right && list.Height == view.ClientSize.Height - Ui.Scale(view, 80), "history preview stays in the right detail column and preserves the full-height record list: " + context);
+            check(view.ClientRectangle.Contains(panel.Bounds) && panel.ClientRectangle.Contains(preview.Bounds) && panel.Left >= list.Right && list.Bottom == view.ClientSize.Height - Ui.Scale(view, 36), "history preview stays in the right detail column and the record list fills the space below the filters: " + context + " view=" + view.ClientSize + " panel=" + panel.Bounds + " image=" + preview.Bounds + " list=" + list.Bounds);
             check(capture || (panel.Bottom + Ui.Scale(view, 12) <= source.Parent.Top && source.Parent.ClientRectangle.Contains(source.Bounds) && source.Height >= source.Font.Height), "the right preview leaves a complete readable text line in the source card: " + context);
             if (((HistoryEntry)Field<ListBox>(view, "list").SelectedItem).Kind == "image_translation")
                 check(source.Parent.Bottom + Ui.Scale(view, 12) <= translation.Parent.Top && translation.Parent.ClientRectangle.Contains(translation.Bounds) && translation.Height >= translation.Font.Height, "the translation retains its separate readable card below the source: " + context);

@@ -130,7 +130,7 @@ namespace SnapTransOCR
         }
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLong(IntPtr window, int index);
         [DllImport("user32.dll")] private static extern IntPtr ChildWindowFromPointEx(IntPtr parent, Point point, uint flags);
-        internal static void SimulateDpi(SettingsForm form, int dpi, List<Font> fonts)
+        internal static void SimulateDpi(Form form, int dpi, List<Font> fonts)
         {
             form.PerformAutoScale();
             var controls = new[] { (Control)form }.Concat(Descendants(form)).ToArray();
@@ -155,7 +155,9 @@ namespace SnapTransOCR
                     var font = new Font(originals[i].FontFamily, originals[i].Size * scale, originals[i].Style);
                     fonts.Add(font); controls[i].Font = font;
                 }
-            form.PerformLayout(); form.SelectPage("常规设置");
+            form.PerformLayout();
+            var settings = form as SettingsForm;
+            if (settings != null) settings.SelectPage("常规设置");
         }
         private static IEnumerable<Control> Descendants(Control parent)
         {

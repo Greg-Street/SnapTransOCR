@@ -85,6 +85,7 @@ namespace SnapTransOCR
         public AppSettings Value { get; private set; }
         public event Action<Bitmap> HistoryImageRequested;
         public event Action<bool> HistoryRecordingChanged;
+        public event Action HistoryRequested;
         private readonly Dictionary<string, TextBox> fields = new Dictionary<string, TextBox>();
         private readonly Dictionary<string, ToggleSwitch> toggles = new Dictionary<string, ToggleSwitch>();
         private readonly Dictionary<string, ToggleSwitch> serviceChecks = new Dictionary<string, ToggleSwitch>();
@@ -97,7 +98,7 @@ namespace SnapTransOCR
         private static readonly string[] imageTargets = { "zh", "en", "ja", "ko", "fr", "de", "ru", "es" };
         private readonly ServiceOrderControl translationOrder, recognitionOrder;
         private readonly Action<AppSettings> save;
-        private readonly GlyphButton close, minimize;
+        private readonly GlyphButton close, minimize, openHistory;
         private readonly Button saveButton, cancelButton;
         private readonly HistoryView historyView;
         private readonly NumericUpDown historyRetention;
@@ -120,11 +121,12 @@ namespace SnapTransOCR
             pageTitle.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Shapes.Drag(this); };
             close = new GlyphButton("close", "关闭设置", Close) { BackColor = Ui.Background };
             minimize = new GlyphButton("min", "最小化", delegate { WindowState = FormWindowState.Minimized; }) { BackColor = Ui.Background };
+            openHistory = new GlyphButton("open", "在独立窗口打开历史与剪贴板", delegate { if (HistoryRequested != null) HistoryRequested(); }) { BackColor = Ui.Background, Visible = false };
             close.SetBounds(748, 9, 32, 32); minimize.SetBounds(711, 9, 32, 32);
             close.Anchor = minimize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            header.Controls.Add(close); header.Controls.Add(minimize);
+            header.Controls.Add(close); header.Controls.Add(minimize); header.Controls.Add(openHistory);
             brand = new Label { Text = "SnapTransOCR", AutoSize = true, Font = new Font("Segoe UI", 17F, FontStyle.Bold), ForeColor = Ui.Accent, Location = new Point(18, 38) };
-            version = new Label { Text = "SnapTransOCR  0.2.20", ForeColor = Ui.Muted, AutoSize = true, Location = new Point(44, 86), Font = new Font("Segoe UI", 9F) };
+            version = new Label { Text = "SnapTransOCR  0.2.21", ForeColor = Ui.Muted, AutoSize = true, Location = new Point(44, 86), Font = new Font("Segoe UI", 9F) };
             sidebar.Controls.Add(brand); sidebar.Controls.Add(version);
             string[] titles = { "常规设置", "热键设置", "截图设置", "翻译设置", "识别设置", "历史记录", "关于" };
             string[] icons = { "general", "keyboard", "crop", "translate", "ocr", "history", "info" };
@@ -303,7 +305,7 @@ namespace SnapTransOCR
             recognitionOrder.OrderChanged += delegate { ReorderServices(ocrServices, recognitionOrder.Order); RefreshServices(); Arrange(true); };
             ReorderServices(services, translationOrder.Order); ReorderServices(ocrServices, recognitionOrder.Order);
             Section(pages["关于"], "SnapTransOCR"); card = Card(pages["关于"]);
-            Row(card, "截图、贴图、OCR 与翻译", "按需截图与云端识别，原生界面，无浏览器内核和本地识别模型。", Ui.Label("0.2.20"));
+            Row(card, "截图、贴图、OCR 与翻译", "按需截图与云端识别，原生界面，无浏览器内核和本地识别模型。", Ui.Label("0.2.21"));
             Note(pages["关于"], "仅在你点击识别或翻译时请求对应 API 服务。历史记录保存在本机，可关闭记录或清空，不会上传历史。");
 
             historyView = new HistoryView(historyStore ?? new HistoryStore(retentionDays: () => Value.HistoryRetentionDays), settings.HistoryEnabled);
@@ -450,6 +452,7 @@ namespace SnapTransOCR
         {
             body.AutoScroll = title != "历史记录";
             historyView.Visible = title == "历史记录";
+            openHistory.Visible = title == "历史记录";
             foreach (var pair in pages) pair.Value.Visible = pair.Key == title;
             foreach (var pair in navigation) { pair.Value.Selected = pair.Key == title; pair.Value.Invalidate(); }
             pageTitle.Text = title; body.AutoScrollPosition = Point.Empty; Arrange(true);
@@ -485,6 +488,7 @@ namespace SnapTransOCR
             pageTitle.Location = new Point(Ui.Scale(this, 27), Ui.Scale(this, 16));
             close.SetBounds(header.ClientSize.Width - Ui.Scale(this, 42), Ui.Scale(this, 9), Ui.Scale(this, 32), Ui.Scale(this, 32));
             minimize.SetBounds(header.ClientSize.Width - Ui.Scale(this, 79), Ui.Scale(this, 9), Ui.Scale(this, 32), Ui.Scale(this, 32));
+            openHistory.SetBounds(minimize.Left - Ui.Scale(this, 37), Ui.Scale(this, 9), Ui.Scale(this, 32), Ui.Scale(this, 32));
             body.SuspendLayout();
             var page = pages[pageTitle.Text];
             page.SuspendLayout();

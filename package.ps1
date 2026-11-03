@@ -1,7 +1,7 @@
-param([string]$Destination = (Join-Path (Split-Path $PSScriptRoot -Parent) 'output\SnapTransOCR-0.2.20'))
+param([string]$Destination = (Join-Path (Split-Path $PSScriptRoot -Parent) 'output\SnapTransOCR-0.2.21'))
 $ErrorActionPreference = 'Stop'
 $projectPath = $PSScriptRoot
-$portableName = 'SnapTransOCR-0.2.20-win-x64'
+$portableName = 'SnapTransOCR-0.2.21-win-x64'
 $destinationPath = [IO.Path]::GetFullPath($Destination)
 $portablePath = Join-Path $destinationPath $portableName
 $stagingPath = Join-Path $destinationPath ('.package-' + [Guid]::NewGuid().ToString('N'))
@@ -25,7 +25,7 @@ SnapTransOCR
 
 运行 SnapTransOCR.exe，程序默认留在系统托盘。
 Alt+1：截图、标注、OCR 和翻译。
-Ctrl+Shift+A：划词翻译。Ctrl+Alt+V：历史 / 剪贴板。
+Ctrl+Shift+A：划词翻译。Ctrl+Shift+S：历史 / 剪贴板。
 右键托盘打开设置，按需填写并启用自己的 API 服务。
 
 固定安装目录：%LOCALAPPDATA%\Programs\SnapTransOCR。
@@ -44,7 +44,7 @@ API 配置保存在 %LOCALAPPDATA%\SnapTransOCR\settings.json。
     if ((Test-Path -LiteralPath $portablePath) -and ((Get-Item -LiteralPath $portablePath).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Portable output directory must not be a reparse point.' }
     New-Item -ItemType Directory -Force -Path $portablePath | Out-Null
     foreach ($file in Get-ChildItem -LiteralPath $stagedPortable -File) { Copy-Item -LiteralPath $file.FullName -Destination $portablePath -Force }
-    $sourceZip = Join-Path $destinationPath 'SnapTransOCR-0.2.20-source.zip'
+    $sourceZip = Join-Path $destinationPath 'SnapTransOCR-0.2.21-source.zip'
     $sourceNames = @('src','tests','assets','docs','build.ps1','make-icon.ps1','package.ps1','README.md','LICENSE','NOTICE.md','.gitignore')
     if (Test-Path -LiteralPath $installScript) { $sourceNames += 'install.ps1' }
     $sourceItems = $sourceNames | ForEach-Object { Join-Path $projectPath $_ }

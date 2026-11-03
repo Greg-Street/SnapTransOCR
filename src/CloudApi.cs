@@ -73,7 +73,7 @@ namespace SnapTransOCR
         internal CloudApi(HttpMessageHandler handler)
         {
             client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan, MaxResponseContentBufferSize = 24 * 1024 * 1024 };
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("SnapTransOCR/0.2.20");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SnapTransOCR/0.2.21");
             bing = new BingTranslator(client);
         }
 

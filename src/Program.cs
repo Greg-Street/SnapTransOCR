@@ -9,8 +9,8 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("SnapTransOCR")]
 [assembly: AssemblyDescription("Windows 截图、贴图、OCR 与 API 翻译")]
-[assembly: AssemblyVersion("0.2.20.0")]
-[assembly: AssemblyFileVersion("0.2.20.0")]
+[assembly: AssemblyVersion("0.2.21.0")]
+[assembly: AssemblyFileVersion("0.2.21.0")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8")]
 
 namespace SnapTransOCR

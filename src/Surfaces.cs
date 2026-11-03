@@ -261,6 +261,10 @@ namespace SnapTransOCR
                 switch (name)
                 {
                     case "close": g.DrawLine(p, 5, 5, 19, 19); g.DrawLine(p, 19, 5, 5, 19); break;
+                    case "search": g.DrawEllipse(p, 3, 3, 13, 13); g.DrawLine(p, 14, 14, 21, 21); break;
+                    case "open": g.DrawLines(p, new[] { new Point(10, 4), new Point(3, 4), new Point(3, 21), new Point(20, 21), new Point(20, 14) }); g.DrawLines(p, new[] { new Point(14, 3), new Point(21, 3), new Point(21, 10) }); g.DrawLine(p, 11, 13, 21, 3); break;
+                    case "image": g.DrawRectangle(p, 3, 4, 18, 16); g.DrawEllipse(p, 7, 7, 3, 3); g.DrawLines(p, new[] { new Point(4, 18), new Point(10, 12), new Point(14, 16), new Point(18, 11), new Point(21, 14) }); break;
+                    case "trash": g.DrawLine(p, 4, 6, 20, 6); g.DrawLines(p, new[] { new Point(9, 5), new Point(9, 3), new Point(15, 3), new Point(15, 5) }); g.DrawLines(p, new[] { new Point(6, 7), new Point(7, 21), new Point(17, 21), new Point(18, 7) }); g.DrawLine(p, 10, 10, 10, 17); g.DrawLine(p, 14, 10, 14, 17); break;
                     case "min": g.DrawLine(p, 5, 15, 19, 15); break;
                     case "info":
                         g.DrawEllipse(p, 3, 3, 18, 18); g.FillEllipse(b, 10.8f, 6.5f, 2.4f, 2.4f);

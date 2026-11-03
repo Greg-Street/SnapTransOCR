@@ -48,7 +48,7 @@ namespace SnapTransOCR
                         {
                             await view.RefreshAsync(); await Ready(view);
                             var list = Field<ListBox>(view, "list"); var search = Field<TextBox>(view, "search");
-                            var type = Field<ComboBox>(view, "typeFilter"); var copy = Field<Button>(view, "copySelected");
+                            var type = Field<HistoryButton[]>(view, "filterButtons"); var copy = Field<Button>(view, "copySelected");
                             list.SelectedIndex = list.Items.Cast<HistoryEntry>().Select((entry, index) => new { entry, index }).Single(pair => pair.entry.Kind == "clipboard_text").index;
                             check(Field<RichTextBox>(view, "source").Text == "Alpha original" && !Field<RoundedPanel>(view, "translationPanel").Visible && !Field<RoundedPanel>(view, "previewPanel").Visible,
                                 "clipboard text fills one editable-selection detail card without an empty translation panel");
@@ -79,7 +79,7 @@ namespace SnapTransOCR
                             view.Visible = true;
                             await Until(delegate { return list.Items.Count == 3 && !Field<bool>(view, "busy"); });
                             check(list.Items.Count == 3 && search.Text == "Alpha" && ((HistoryEntry)list.SelectedItem).Id == selected, "returning to history applies deferred clipboard changes without resetting the current selection");
-                            check(type.Items.Count == 7 && Field<Label>(view, "status").Text.Contains("7 天"), "history presents seven-day retention with clipboard, text and image categories");
+                            check(type.Length == 7 && Field<Label>(view, "status").Text.Contains("7 天"), "history presents seven-day retention with separate clipboard, text and image category buttons");
 
                             view.Dispose();
                             await store.AddAsync(new HistoryEntry { Kind = "clipboard_text", Source = "after disposal" });

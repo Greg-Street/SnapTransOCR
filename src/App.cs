@@ -50,6 +50,8 @@ namespace SnapTransOCR
         private int version;
         private bool capturing, reading, exiting, disposed;
         private SettingsForm settingsWindow;
+        private HistoryForm historyWindow;
+        private bool historyTopmost;
         private EditorForm historyEditor;
         private ScrollForm scroll;
         public DesktopApp(AppSettings initial, bool hidden, string startupWarning = null, Action<AppSettings> persistSettings = null, bool startClipboardHistory = false)
@@ -139,8 +141,14 @@ namespace SnapTransOCR
                 SaveSettings(next); settings = next;
                 if (clipboardHistory != null) clipboardHistory.ResetEnabledState();
                 if (settingsWindow != null) settingsWindow.RefreshHistory(enabled);
+                if (historyWindow != null) historyWindow.View.RefreshRecording(enabled);
             }
-            catch (Exception ex) { if (settingsWindow != null) settingsWindow.RefreshHistory(settings.HistoryEnabled); main.SetStatus("记录开关未保存（" + ex.GetType().Name + "）。"); }
+            catch (Exception ex)
+            {
+                if (settingsWindow != null) settingsWindow.RefreshHistory(settings.HistoryEnabled);
+                if (historyWindow != null) historyWindow.View.RefreshRecording(settings.HistoryEnabled);
+                main.SetStatus("记录开关未保存（" + ex.GetType().Name + "）。");
+            }
         }
 
         private async void SaveLanguages()
@@ -215,6 +223,12 @@ namespace SnapTransOCR
                 settingsWindow.RefreshHistory(next.HistoryEnabled);
                 if (retentionChanged) settingsWindow.RefreshHistoryEntries();
             }
+            if (historyWindow != null)
+            {
+                historyWindow.View.RefreshRecording(next.HistoryEnabled);
+                historyWindow.RefreshShortcut(next.Hotkeys[7]);
+                if (retentionChanged) historyWindow.View.RefreshEntries();
+            }
             main.SetStatus("");
         }
         private void ShowSettings()
@@ -234,6 +248,7 @@ namespace SnapTransOCR
             }, history);
             settingsWindow.HistoryImageRequested += async delegate(Bitmap image) { await OpenEditor(image, false); };
             settingsWindow.HistoryRecordingChanged += ChangeHistoryRecording;
+            settingsWindow.HistoryRequested += ShowHistory;
             settingsWindow.FormClosed += delegate { settingsWindow = null; };
             settingsWindow.Show();
         }
@@ -241,8 +256,16 @@ namespace SnapTransOCR
         private void ShowHistory()
         {
             if (exiting) return;
-            ShowSettings();
-            settingsWindow.SelectPage("历史记录");
+            if (historyWindow == null || historyWindow.IsDisposed)
+            {
+                historyWindow = new HistoryForm(history, settings.HistoryEnabled, historyTopmost, settings.Hotkeys[7]);
+                historyWindow.View.ImageRequested += async delegate(Bitmap image) { await OpenEditor(image, false); };
+                historyWindow.View.RecordingChanged += ChangeHistoryRecording;
+                historyWindow.SettingsRequested += ShowSettings;
+                historyWindow.PinChanged += delegate(bool pinned) { historyTopmost = pinned; };
+                historyWindow.FormClosed += delegate { historyWindow = null; };
+            }
+            historyWindow.Present();
         }
         private async Task<string> RecordHistory(AppSettings snapshot, string kind, string source, string translated, Bitmap image = null)
         {
@@ -428,7 +451,7 @@ namespace SnapTransOCR
                         editor.Disposed += delegate { if (historyEditor == editor) historyEditor = null; };
                         editor.EnableHistoryNavigation(ShowHistory);
                     }
-                    EditorPlacement.Place(editor, !recordHistory ? settingsWindow : null);
+                    EditorPlacement.Place(editor, !recordHistory ? (Form)historyWindow ?? settingsWindow : null);
                     Track(editor);
                 }
                 catch { editor.Dispose(); throw; }
@@ -725,6 +748,7 @@ namespace SnapTransOCR
             Cancel();
             CancelOcr();
             if (settingsWindow != null) settingsWindow.Close();
+            if (historyWindow != null) historyWindow.Close();
             Task.WaitAll(historyWrites.ToArray());
             historyWrites.Clear();
             try { history.FlushAsync().GetAwaiter().GetResult(); } catch (Exception) { } // Preserve the original file on an unreadable store and allow exit.

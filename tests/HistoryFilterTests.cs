@@ -36,9 +36,9 @@ namespace SnapTransOCR
                         try
                         {
                             await view.RefreshAsync(); await Ready(view);
-                            var list = Field<ListBox>(view, "list"); var search = Field<TextBox>(view, "search"); var type = Field<ComboBox>(view, "typeFilter");
+                            var list = Field<ListBox>(view, "list"); var search = Field<TextBox>(view, "search"); var type = Field<HistoryButton[]>(view, "filterButtons");
                             var preview = Field<PictureBox>(view, "preview"); var status = Field<Label>(view, "status");
-                            check(list.Items.Count == 6 && type.SelectedIndex == 0 && search.Text.Length == 0, "history initially presents all loaded records without a filter");
+                            check(list.Items.Count == 6 && view.FilterIndex == 0 && search.Text.Length == 0, "history initially presents all loaded records without a filter");
                             Select(list, item => item.Kind == "ocr"); await Ready(view);
                             string selectedId = ((HistoryEntry)list.SelectedItem).Id;
                             Bitmap originalPreview = (Bitmap)preview.Image;
@@ -85,13 +85,13 @@ namespace SnapTransOCR
                             Choose(type, 3); Type(search, "delta"); await Ready(view);
                             Bitmap removedPreview = (Bitmap)preview.Image;
                             Field<Button>(view, "remove").PerformClick(); await Ready(view);
-                            check(list.Items.Count == 0 && search.Text == "delta" && type.SelectedIndex == 3 && status.Text.Contains("0 / 5") && Disposed(removedPreview), "deleting the only match preserves filter controls, updates the loaded total and releases its thumbnail");
+                            check(list.Items.Count == 0 && search.Text == "delta" && view.FilterIndex == 3 && status.Text.Contains("0 / 5") && Disposed(removedPreview), "deleting the only match preserves filter controls, updates the loaded total and releases its thumbnail");
                             await Add(store, "translation", "new record", "DELTA replacement", false);
                             await view.RefreshAsync(); await Ready(view);
                             check(list.Items.Count == 1 && Field<RichTextBox>(view, "translation").Text == "DELTA replacement" && status.Text.Contains("1 / 6"), "refreshing new history reapplies the active query and type to the refreshed cache");
                             Field<Button>(view, "clear").PerformClick(); await Ready(view);
                             check(list.Items.Count == 0 && (await store.LoadAsync()).Length == 0 && status.Text == "暂无历史记录" && Field<Label>(view, "empty").Text == "暂无历史记录"
-                                && search.Text == "delta" && type.SelectedIndex == 3, "clear all removes unfiltered records too and retains the user's current filter controls");
+                                && search.Text == "delta" && view.FilterIndex == 3, "clear all removes unfiltered records too and retains the user's current filter controls");
                             await Add(store, "capture", "", "", true);
                             Type(search, ""); Choose(type, 0); await view.RefreshAsync(); await Ready(view);
                             Bitmap finalPreview = (Bitmap)preview.Image;
@@ -127,16 +127,16 @@ namespace SnapTransOCR
                         form.ClientSize = new Size(Ui.Scale(form, width), Ui.Scale(form, 580));
                         form.SelectPage("历史记录"); form.PerformLayout();
                         var view = Field<HistoryView>(form, "historyView");
-                        var field = Field<TextInputField>(view, "searchField"); var search = Field<TextBox>(view, "search"); var type = Field<ComboBox>(view, "typeFilter");
+                        var field = Field<TextInputField>(view, "searchField"); var search = Field<TextBox>(view, "search"); var type = Field<HistoryButton[]>(view, "filterButtons");
                         var toggle = Field<ToggleSwitch>(view, "recording"); var clear = Field<Button>(view, "clear"); var list = Field<RoundedPanel>(view, "listPanel");
                         string context = width + "px at " + dpi + " DPI";
-                        check(view.ClientRectangle.Contains(field.Bounds) && view.ClientRectangle.Contains(type.Bounds) && field.ClientRectangle.Contains(search.Bounds)
-                            && toggle.Right < field.Left && field.Right < type.Left && type.Right < clear.Left, "history filters and existing actions fit their single toolbar row without overlap: " + context);
-                        check(field.Bottom < list.Top && type.Bottom < list.Top && list.Top == Ui.Scale(view, 44) && list.Height == view.Height - Ui.Scale(view, 80),
-                            "history filters preserve the existing list and detail vertical space: " + context);
-                        check(search.Width >= Ui.Scale(view, 120) && type.Width >= Ui.Scale(view, 100), "narrow high-DPI history retains readable query and category controls: " + context);
-                        check(type.Items.Cast<string>().All(item => TextRenderer.MeasureText(item, type.Font).Width <= type.Width - Ui.Scale(type, 38)),
-                            "history category labels remain complete beside their dropdown arrow: " + context);
+                        check(view.ClientRectangle.Contains(field.Bounds) && type.All(button => view.ClientRectangle.Contains(button.Bounds)) && field.ClientRectangle.Contains(search.Bounds)
+                            && field.Right < toggle.Left && toggle.Right < clear.Left, "history search, recording and clear actions fit their toolbar without overlap: " + context);
+                        check(field.Bottom < type.Min(button => button.Top) && type.Max(button => button.Bottom) < list.Top && list.Bottom < view.Height,
+                            "separate category buttons stay between the search row and history content: " + context);
+                        check(search.Width >= Ui.Scale(view, 120) && type.Zip(type.Skip(1), (a, b) => a.Right < b.Left || a.Bottom < b.Top).All(value => value), "narrow high-DPI history retains readable search and nonoverlapping category buttons: " + context);
+                        check(type.All(button => TextRenderer.MeasureText(button.Text, button.Font, Size.Empty, TextFormatFlags.NoPadding).Width <= button.Width - Ui.Scale(button, 28)),
+                            "all seven category labels fit beside their own icons: " + context);
                     }
                 }
                 finally { foreach (Font font in fonts) font.Dispose(); }
@@ -156,16 +156,12 @@ namespace SnapTransOCR
             if (text.Length == 0) Native.SendMessage(input.Handle, 0x102, new IntPtr(8), IntPtr.Zero);
             else foreach (char value in text) Native.SendMessage(input.Handle, 0x102, new IntPtr(value), IntPtr.Zero);
         }
-        private static void Choose(ComboBox combo, int index)
+        private static void Choose(HistoryButton[] buttons, int index)
         {
-            combo.Focus();
-            for (int attempt = 0; combo.SelectedIndex != index && attempt < combo.Items.Count; attempt++)
-            {
-                int key = (int)(combo.SelectedIndex < index ? Keys.Down : Keys.Up);
-                Native.SendMessage(combo.Handle, 0x100, new IntPtr(key), IntPtr.Zero);
-                Native.SendMessage(combo.Handle, 0x101, new IntPtr(key), IntPtr.Zero);
-            }
-            if (combo.SelectedIndex != index) throw new InvalidOperationException("The category control did not respond to keyboard navigation.");
+            var button = buttons[index]; button.Focus();
+            Native.SendMessage(button.Handle, 0x100, new IntPtr((int)Keys.Space), IntPtr.Zero);
+            Native.SendMessage(button.Handle, 0x101, new IntPtr((int)Keys.Space), IntPtr.Zero);
+            if (!button.Selected) throw new InvalidOperationException("The category button did not respond to keyboard navigation.");
         }
         private static void Select(ListBox list, Func<HistoryEntry, bool> predicate) { list.SelectedIndex = list.Items.Cast<HistoryEntry>().Select((item, index) => new { item, index }).Single(pair => predicate(pair.item)).index; }
         private static async Task Ready(HistoryView view) { while (Field<bool>(view, "busy") || Field<CancellationTokenSource>(view, "previewRequest") != null) await Task.Delay(1); }
