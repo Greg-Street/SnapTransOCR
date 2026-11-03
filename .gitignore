@@ -1,0 +1,21 @@
+dist/
+test-output/
+*.user
+*.suo
+
+# Local credentials, personal data, and generated files
+.env
+.env.*
+*.keystore
+*.jks
+*.p12
+*.pem
+settings.json
+local.properties
+data/
+*.log
+*.tmp
+__pycache__/
+*.py[cod]
+.vscode/
+.idea/
