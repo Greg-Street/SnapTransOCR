@@ -95,10 +95,13 @@ namespace SnapTransOCR
                 using (var form = new ScrollForm(region, first, capture))
                 {
                     form.Bounds = new Rectangle(-28000, -28000, 200, 100);
+                    var preview = (PictureBox)typeof(ScrollForm).GetField("preview", Private).GetValue(form);
+                    Image retained = preview.Image;
                     await (Task)typeof(ScrollForm).GetMethod("CaptureFrame", Private).Invoke(form, null);
                     var stitcher = (Stitcher)typeof(ScrollForm).GetField("stitcher", Private).GetValue(form);
                     check(captures == 1 && stitcher.FrameCount == 1 && !form.IsDisposed,
                         "an uncancelled capture still reads one frame and rejects an unchanged synthetic image");
+                    check(ReferenceEquals(retained, preview.Image), "an unchanged scroll frame retains its existing preview without decoding or allocating a replacement");
                 }
             }
         }

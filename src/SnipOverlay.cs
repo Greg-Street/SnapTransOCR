@@ -7,7 +7,7 @@ using System.Windows.Forms;
 
 namespace SnapTransOCR
 {
-    internal enum CaptureAction { Copy, Save, Pin, Ocr, Translate, Scroll, ImageTranslate, Handwriting, QrCode, Table, BaiduTable }
+    internal enum CaptureAction { Copy, Save, Pin, Ocr, Translate, Scroll, ImageTranslate, Handwriting, QrCode, Table, BaiduTable, Gif }
     internal sealed class CaptureForm : Form
     {
         private readonly Bitmap desktop;
@@ -15,6 +15,8 @@ namespace SnapTransOCR
         private readonly AppSettings options;
         private readonly AnnotationStyle initialStyle;
         private readonly int initialAction;
+        private readonly FrozenPointer frozenPointer;
+        private readonly CaptureShortcuts shortcuts;
         private readonly List<Rectangle> windows = new List<Rectangle>();
         private readonly List<Panel> grips = new List<Panel>();
         private readonly List<GlyphButton> toolButtons = new List<GlyphButton>();
@@ -25,7 +27,13 @@ namespace SnapTransOCR
         private ImageCanvas canvas;
         private Rectangle selected, origin, transformStart;
         private Point start, mouse, transformPoint;
-        private bool dragging, transforming, windowMode;
+        private bool dragging, transforming, windowMode = true;
+        private bool pointerVisible, shortcutsShown;
+        internal bool PointerVisible { get { return pointerVisible; } }
+        internal bool ShortcutsVisible { get { return shortcutsShown; } }
+        internal bool HasSelection { get { return canvas != null; } }
+        internal bool EditingText { get { return canvas != null && canvas.EditingText; } }
+        private int BorderWidth { get { return Math.Max(1, Math.Min(12, options.CaptureBorderWidth)); } }
         private int transformHandle;
         public Bitmap Captured { get; private set; }
         public Rectangle ScreenRegion { get; private set; }
@@ -38,19 +46,28 @@ namespace SnapTransOCR
         {
             Native.EnumWindows(delegate(IntPtr window, IntPtr parameter)
             {
-                if (Native.IsWindowVisible(window))
+                int cloaked;
+                if (Native.IsWindowVisible(window) && !Native.IsIconic(window) &&
+                    // WS_EX_LAYERED | WS_EX_TRANSPARENT marks an overlay whose mouse input passes through.
+                    (Native.GetWindowLongPtr(window, -20).ToInt64() & 0x80020) != 0x80020 &&
+                    (Native.DwmGetWindowAttribute(window, 14, out cloaked, sizeof(int)) != 0 || cloaked == 0))
                 {
                     Native.RECT rectangle;
-                    if (Native.DwmGetWindowAttribute(window, 9, out rectangle, System.Runtime.InteropServices.Marshal.SizeOf(typeof(Native.RECT))) != 0) Native.GetWindowRect(window, out rectangle);
+                    if (Native.DwmGetWindowAttribute(window, 9, out rectangle, System.Runtime.InteropServices.Marshal.SizeOf(typeof(Native.RECT))) != 0 && !Native.GetWindowRect(window, out rectangle)) return true;
                     if (rectangle.Right - rectangle.Left > 20 && rectangle.Bottom - rectangle.Top > 20) windows.Add(rectangle.Rectangle);
                 }
                 return true;
             }, IntPtr.Zero);
+            mouse = Cursor.Position; mouse.Offset(-desktopBounds.Left, -desktopBounds.Top);
+            selected = WindowSelection(mouse);
         }
         private CaptureForm(string title, AppSettings settings, int action, Rectangle bounds) : this(title, settings, action, ScreenCapture.FrozenDesktop(bounds), bounds) { }
-        internal CaptureForm(string title, AppSettings settings, int action, Bitmap frozen, Rectangle bounds)
+        internal CaptureForm(string title, AppSettings settings, int action, Bitmap frozen, Rectangle bounds, FrozenPointer pointer = null)
         {
             options = settings; initialStyle = new AnnotationStyle(settings); desktop = frozen; desktopBounds = bounds; initialAction = action;
+            frozenPointer = pointer ?? CaptureSessionUi.FreezePointer(desktop, bounds);
+            pointerVisible = settings.CaptureCursor;
+            if (frozenPointer != null && pointerVisible) frozenPointer.Apply(desktop, true);
             AutoScaleMode = AutoScaleMode.None; Font = Ui.Font; FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual; Bounds = bounds; TopMost = true; ShowInTaskbar = true;
             DoubleBuffered = true; KeyPreview = true; Cursor = Cursors.Cross; Text = "SnapTransOCR · 截图";
@@ -64,6 +81,9 @@ namespace SnapTransOCR
                 grip.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) BeginTransform(handle, grip.PointToScreen(e.Location)); };
                 grips.Add(grip); Controls.Add(grip);
             }
+            shortcutsShown = settings.CaptureShortcutHints;
+            shortcuts = new CaptureShortcuts(delegate { ShowShortcuts(false); }) { Visible = shortcutsShown };
+            shortcuts.SetPointer(pointerVisible); Controls.Add(shortcuts);
         }
         protected override void OnHandleCreated(EventArgs e)
         {
@@ -71,6 +91,8 @@ namespace SnapTransOCR
             // A hotkey can open the overlay without any MouseMove event before its first paint.
             mouse = Cursor.Position;
             mouse.Offset(-desktopBounds.Left, -desktopBounds.Top);
+            if (canvas == null && windowMode) selected = WindowSelection(mouse);
+            PositionShortcuts();
         }
         protected override void OnShown(EventArgs e) { base.OnShown(e); if (!Ui.RenderOffscreen) { Bounds = desktopBounds; Activate(); } }
         protected override void OnDpiChanged(DpiChangedEventArgs e)
@@ -79,6 +101,7 @@ namespace SnapTransOCR
             e.Cancel = true;
             base.OnDpiChanged(e);
             PositionToolbar();
+            PositionShortcuts();
         }
         protected override void WndProc(ref Message message)
         {
@@ -118,6 +141,7 @@ namespace SnapTransOCR
             Button("translate", "截图翻译", delegate { Complete(CaptureAction.Translate); });
             Button("image-translate", "图片原位翻译 / 悬浮译图", delegate { Complete(CaptureAction.ImageTranslate); });
             Button("scroll", "滚动长截图", delegate { Complete(CaptureAction.Scroll); });
+            Button("gif", "录制 GIF 动图", delegate { Complete(CaptureAction.Gif); });
             Button("pin", "置顶贴图", delegate { Complete(CaptureAction.Pin); });
             Button("save", "保存 Ctrl+S", delegate { Complete(CaptureAction.Save); });
             Button("copy", "复制并完成 Enter / Ctrl+C", delegate { Complete(CaptureAction.Copy); });
@@ -130,7 +154,7 @@ namespace SnapTransOCR
         {
             if (canvas == null) return;
             Action = action;
-            Captured = action == CaptureAction.Scroll ? null : canvas.Render();
+            Captured = action == CaptureAction.Scroll || action == CaptureAction.Gif ? null : canvas.Render();
             ScreenRegion = new Rectangle(desktopBounds.Left + selected.X, desktopBounds.Top + selected.Y, selected.Width, selected.Height);
             DialogResult = DialogResult.OK; Close();
         }
@@ -143,6 +167,7 @@ namespace SnapTransOCR
             if (canvas != null) { Controls.Remove(canvas); canvas.Dispose(); }
             origin = selected = rectangle;
             canvas = new ImageCanvas(desktop.Clone(rectangle, PixelFormat.Format32bppPArgb)) { PixelView = true, Bounds = rectangle, Dock = DockStyle.None, Cursor = Cursors.SizeAll };
+            canvas.MouseUp += delegate { shortcuts.Invalidate(); };
             canvas.MoveSelectionRequested += delegate(Point point) { BeginTransform(-1, point); };
             canvas.Changed += delegate
             {
@@ -155,7 +180,31 @@ namespace SnapTransOCR
             foreach (var button in toolButtons) { button.Selected = (Tool)button.Tag == Tool.Pan; button.Invalidate(); }
             toolbar.Visible = true; PositionToolbar(); toolbar.BringToFront();
             foreach (var grip in grips) { grip.Visible = true; grip.BringToFront(); }
+            shortcuts.BringToFront();
+            shortcuts.Invalidate();
             Invalidate();
+        }
+        private void ShowShortcuts(bool visible)
+        {
+            shortcutsShown = visible; shortcuts.Visible = visible;
+            if (visible) { PositionShortcuts(); shortcuts.BringToFront(); }
+        }
+        private void PositionShortcuts()
+        {
+            if (shortcuts == null || !shortcutsShown) return;
+            Point screenPoint = new Point(mouse.X + desktopBounds.Left, mouse.Y + desktopBounds.Top);
+            Rectangle area = Rectangle.Intersect(Screen.FromPoint(screenPoint).WorkingArea, desktopBounds);
+            if (area.IsEmpty) area = desktopBounds;
+            area.Offset(-desktopBounds.Left, -desktopBounds.Top);
+            shortcuts.Place(area, Native.MonitorScale(screenPoint));
+        }
+        private void TogglePointer()
+        {
+            pointerVisible = !pointerVisible; shortcuts.SetPointer(pointerVisible);
+            if (frozenPointer == null) return;
+            frozenPointer.Apply(desktop, pointerVisible);
+            if (canvas != null) canvas.UpdateBackground(frozenPointer.Pixels(pointerVisible), new Point(frozenPointer.Bounds.X - origin.X, frozenPointer.Bounds.Y - origin.Y));
+            Invalidate(frozenPointer.Bounds);
         }
         private void PositionToolbar()
         {
@@ -188,13 +237,24 @@ namespace SnapTransOCR
             transforming = true; transformHandle = handle; transformStart = selected; transformPoint = PointToClient(screen);
             canvas.Hide(); toolbar.Hide(); foreach (var grip in grips) grip.Hide(); Capture = true;
         }
+        private Rectangle WindowSelection(Point point)
+        {
+            Point screen = new Point(point.X + desktopBounds.Left, point.Y + desktopBounds.Top);
+            foreach (Rectangle rectangle in windows)
+            {
+                if (!rectangle.Contains(screen)) continue;
+                var relative = rectangle; relative.Offset(-desktopBounds.Left, -desktopBounds.Top);
+                return Rectangle.Intersect(relative, new Rectangle(Point.Empty, desktop.Size));
+            }
+            return Rectangle.Empty;
+        }
         protected override void OnMouseDown(MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Right) { Close(); return; }
             if (e.Button != MouseButtons.Left) return;
-            if (windowMode) { Select(selected); AutoAction(); return; }
-            start = mouse = e.Location; dragging = true; selected = Rectangle.Empty; Capture = true;
+            start = mouse = e.Location; dragging = true; selected = windowMode ? WindowSelection(mouse) : Rectangle.Empty; Capture = true;
             if (canvas != null) { Controls.Remove(canvas); canvas.Dispose(); canvas = null; }
+            shortcuts.Invalidate();
             if (toolbar != null) toolbar.Hide(); foreach (var grip in grips) grip.Hide();
             Invalidate();
         }
@@ -203,6 +263,7 @@ namespace SnapTransOCR
             Point oldMouse = mouse;
             Rectangle oldSelection = selected;
             mouse = e.Location;
+            PositionShortcuts();
             if (transforming)
             {
                 int dx = e.X - transformPoint.X, dy = e.Y - transformPoint.Y;
@@ -222,8 +283,7 @@ namespace SnapTransOCR
             else if (dragging) selected = ScreenCapture.Selection(start, mouse, ClientSize);
             else if (windowMode && canvas == null)
             {
-                selected = Rectangle.Empty; Point screen = PointToScreen(mouse);
-                foreach (Rectangle rectangle in windows) if (rectangle.Contains(screen)) { var relative = rectangle; relative.Offset(-desktopBounds.Left, -desktopBounds.Top); selected = Rectangle.Intersect(relative, ClientRectangle); break; }
+                selected = WindowSelection(mouse);
             }
             using (var dirty = new Region(oldSelection))
             {
@@ -246,7 +306,8 @@ namespace SnapTransOCR
         {
             if (rectangle.IsEmpty) return;
             Rectangle outer = rectangle, inner = rectangle;
-            outer.Inflate(2, 2); inner.Inflate(-2, -2);
+            int padding = BorderWidth + 2;
+            outer.Inflate(padding, padding); inner.Inflate(-padding, -padding);
             using (var border = new Region(outer))
             {
                 if (inner.Width > 0 && inner.Height > 0) border.Exclude(inner);
@@ -277,7 +338,8 @@ namespace SnapTransOCR
             if (transforming) { transforming = false; Capture = false; Select(selected); return; }
             if (!dragging) return;
             dragging = false; Capture = false;
-            Select(ScreenCapture.Selection(start, e.Location, ClientSize)); AutoAction();
+            bool click = Math.Abs(e.X - start.X) < Math.Max(1, SystemInformation.DragSize.Width / 2) && Math.Abs(e.Y - start.Y) < Math.Max(1, SystemInformation.DragSize.Height / 2);
+            Select(windowMode && click ? WindowSelection(start) : ScreenCapture.Selection(start, e.Location, ClientSize)); AutoAction();
         }
         private void AutoAction()
         {
@@ -285,9 +347,17 @@ namespace SnapTransOCR
             else if (initialAction == 2) Complete(CaptureAction.Translate);
             else if (initialAction == 3) Complete(CaptureAction.Scroll);
             else if (initialAction == 4) Complete(CaptureAction.ImageTranslate);
+            else if (initialAction == 5) Complete(CaptureAction.Gif);
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            shortcuts.Invalidate();
+            if (e.Modifiers == Keys.None && (e.KeyCode == Keys.F1 || e.KeyCode == Keys.F2))
+            {
+                if (e.KeyCode == Keys.F1) ShowShortcuts(!shortcutsShown);
+                else TogglePointer();
+                e.Handled = e.SuppressKeyPress = true; return;
+            }
             if (canvas != null && canvas.EditingText)
             {
                 if (e.KeyCode == Keys.Escape) { canvas.CancelText(); e.Handled = e.SuppressKeyPress = true; }
@@ -299,7 +369,7 @@ namespace SnapTransOCR
             else if (e.Control && e.KeyCode == Keys.Y && canvas != null) { canvas.Redo(); e.SuppressKeyPress = true; }
             else if (e.Control && e.KeyCode == Keys.S) { Complete(CaptureAction.Save); e.SuppressKeyPress = true; }
             else if (e.Control && e.KeyCode == Keys.C) { Complete(CaptureAction.Copy); e.SuppressKeyPress = true; }
-            else if (e.KeyCode == Keys.Space && canvas == null) { windowMode = !windowMode; selected = Rectangle.Empty; Invalidate(); }
+            else if (e.KeyCode == Keys.Space && canvas == null) { windowMode = !windowMode; selected = windowMode ? WindowSelection(mouse) : Rectangle.Empty; Invalidate(); e.SuppressKeyPress = true; }
             else if (e.KeyCode == Keys.Enter)
             {
                 if (canvas != null) Complete(e.Control ? CaptureAction.Ocr : CaptureAction.Copy);
@@ -320,7 +390,8 @@ namespace SnapTransOCR
             using (var outside = new Region(ClientRectangle)) { if (!selected.IsEmpty) outside.Exclude(selected); e.Graphics.FillRegion(shade, outside); }
             if (!selected.IsEmpty)
             {
-                using (var border = new Pen(Ui.Accent, 1)) e.Graphics.DrawRectangle(border, selected);
+                var outline = selected; int offset = (BorderWidth + 1) / 2; outline.Inflate(offset, offset);
+                using (var border = new Pen(Ui.Accent, BorderWidth)) e.Graphics.DrawRectangle(border, outline);
                 DrawTag(e.Graphics);
             }
             if (canvas == null && !transforming)
@@ -354,7 +425,7 @@ namespace SnapTransOCR
         }
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { desktop.Dispose(); tagFont.Dispose(); }
+            if (disposing) { desktop.Dispose(); tagFont.Dispose(); if (frozenPointer != null) frozenPointer.Dispose(); }
             base.Dispose(disposing);
         }
     }

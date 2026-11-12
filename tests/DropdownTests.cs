@@ -16,7 +16,7 @@ namespace SnapTransOCR
             EditableSelection(check);
             HeightConsistency(check);
             using (var form = new SettingsForm(new AppSettings(), delegate { }))
-                check(Descendants(form).OfType<ComboBox>().Count() == 12 && Descendants(form).OfType<ComboBox>().All(control => control is StyledComboBox), "every settings dropdown, including Baidu mode, editable model selection and history filtering, uses the shared native styled control");
+                check(Descendants(form).OfType<ComboBox>().Count() == 12 && Descendants(form).OfType<ComboBox>().All(control => control is StyledComboBox), "all twelve settings dropdowns, including capture border width, use the shared native styled control");
             using (var form = new MainForm())
                 check(Descendants(form).OfType<ComboBox>().Count() == 2 && Descendants(form).OfType<ComboBox>().All(control => control is StyledComboBox), "both translation language dropdowns use the shared style");
             using (var parent = new RoundedPanel { Fill = Color.White, Size = new Size(300, 100) })

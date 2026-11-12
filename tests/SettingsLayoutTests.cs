@@ -93,7 +93,7 @@ namespace SnapTransOCR
                         form.SelectPage("翻译设置"); body.AutoScrollPosition = new Point(0, pages["翻译设置"].Height);
                         form.SelectPage("识别设置"); form.SelectPage("关于"); form.SelectPage("翻译设置");
                         Application.DoEvents();
-                        check(body.AutoScrollPosition == Point.Empty && pages["翻译设置"].Left == 0 && !body.HorizontalScroll.Visible, "scroll resets when switching hidden pages after " + dpi + " DPI transition");
+                        check(body.AutoScrollPosition == Point.Empty && pages["翻译设置"].Left == 0 && !body.HorizontalScroll.Visible, "scroll resets when switching hidden pages after " + dpi + " DPI transition, scroll=" + body.AutoScrollPosition + ", page=" + pages["翻译设置"].Location + ", horizontal=" + body.HorizontalScroll.Visible);
                         check((GetWindowLong(body.Handle, -16).ToInt64() & 0x00100000) == 0, "DPI transition leaves no native horizontal scrollbar at " + dpi + " DPI");
                     }
                 }
@@ -120,7 +120,7 @@ namespace SnapTransOCR
                         var navigation = Descendants(form).OfType<NavButton>().OrderBy(control => control.Top).ToArray();
                         check(form.DeviceDpi == dpi && sidebar.Width == 208 * dpi / 96, "settings sidebar uses initial display DPI before its first handle at " + dpi);
                         Size limit = SystemInformation.MaxWindowTrackSize;
-                        check(form.ClientSize.Width == Math.Min(1000 * dpi / 96, limit.Width) && form.ClientSize.Height == Math.Min(730 * dpi / 96, limit.Height), "settings initial size scales once within native window-track limits at " + dpi + " DPI");
+                        check(form.ClientSize.Width == Math.Min(1000 * dpi / 96, limit.Width) && form.ClientSize.Height == Math.Min(730 * dpi / 96, limit.Height), "settings initial size scales once within native window-track limits at " + dpi + " DPI, client=" + form.ClientSize + ", limit=" + limit);
                         check(brand.Right < sidebar.ClientSize.Width && !sidebar.HorizontalScroll.Visible, "settings brand fits the initial high-DPI sidebar at " + dpi);
                         check(navigation.All(control => control.Height == (int)Math.Round(47 * dpi / 96.0)) && navigation.Zip(navigation.Skip(1), (a, b) => a.Bottom <= b.Top).All(value => value), "settings navigation has scaled spacing on initial launch at " + dpi);
                     }

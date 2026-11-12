@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -89,13 +90,14 @@ namespace SnapTransOCR
         [DllImport("user32.dll")] private static extern bool GetCaretPos(out Point point);
         public int LogicalTop { get; private set; }
         public string Value = "";
+        public bool IsNotice { get; private set; }
         public bool Expanded;
         public event Action HeaderClick, SizeChangedByContent;
         public event Action<int> ScrollRequested;
         public ServiceCard(string caption, string letter)
         {
             Radius = 13; Fill = Color.FromArgb(232, 232, 234);
-            title = new Label { Text = caption, Font = new Font("Microsoft YaHei UI", 10.5F), BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft, Cursor = Cursors.Hand };
+            title = new Label { Text = caption, Font = new Font("Microsoft YaHei UI", 10.5F), BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true, Cursor = Cursors.Hand };
             badge = new Label { Text = letter, TextAlign = ContentAlignment.MiddleCenter, BackColor = Color.White, ForeColor = Ui.Accent, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
             result = new ResultTextBox { Multiline = true, ReadOnly = true, DetectUrls = false, AutoWordSelection = false, BorderStyle = BorderStyle.None, BackColor = Color.White, ForeColor = Ui.Ink, ScrollBars = RichTextBoxScrollBars.None, Font = new Font("Microsoft YaHei UI", 10.5F), AccessibleName = caption + "译文" };
             result.ContentsResized += delegate(object sender, ContentsResizedEventArgs e) { documentHeight = e.NewRectangle.Height; };
@@ -110,6 +112,7 @@ namespace SnapTransOCR
         public void SetValue(string value, bool expanded)
         {
             value = value ?? "";
+            IsNotice = false; copy.Enabled = !String.IsNullOrWhiteSpace(value);
             mapping = true;
             try
             {
@@ -123,6 +126,8 @@ namespace SnapTransOCR
             Invalidate(); PerformLayout();
             if (SizeChangedByContent != null) SizeChangedByContent();
         }
+        public void SetNotice(string value) { SetValue(value, true); IsNotice = true; copy.Enabled = false; title.Cursor = Cursors.Hand; }
+        public void SetCaption(string value) { title.Text = value; result.AccessibleName = value + "译文"; }
         public int DesiredHeight { get { return MeasureHeight(Width); } }
         public int MeasureHeight(int width)
         {
@@ -230,6 +235,7 @@ namespace SnapTransOCR
         private readonly Dictionary<string, ServiceCard> cards = new Dictionary<string, ServiceCard>();
         private readonly HashSet<string> enabledProviders = new HashSet<string> { "volc", "baidu" };
         private string activeProvider = "volc";
+        private string arkModel;
         private string[] providerOrder = (string[])AppSettings.TranslationProviders.Clone();
         private bool busy, refreshing, autoHeight = true, hideOnBlur, userSized, layingOut, settingSource, clearingResults;
         private bool settingsLoaded, resizing;
@@ -287,17 +293,7 @@ namespace SnapTransOCR
             results.ViewportChanged += LayoutResults;
             foreach (string provider in AppSettings.TranslationProviders)
             {
-                string selected = provider;
-                var card = new ServiceCard(AppSettings.TranslationName(provider), provider == "volc" ? "V" : provider == "bing" ? "M" : provider == "ark" ? "A" : "B") { Visible = enabledProviders.Contains(provider) };
-                card.HeaderClick += delegate
-                {
-                    if (!enabledProviders.Contains(selected)) return;
-                    if (card.Value.Length > 0 || String.IsNullOrWhiteSpace(source.Text)) card.SetValue(card.Value, !card.Expanded);
-                    else if (ServiceTranslateRequested != null) ServiceTranslateRequested(source.Text, selected);
-                };
-                card.SizeChangedByContent += delegate { if (!clearingResults) LayoutContent(); };
-                card.ScrollRequested += results.ScrollBy;
-                cards.Add(provider, card); results.Controls.Add(card);
+                AddServiceCard(provider, AppSettings.TranslationName(provider), provider == "volc" ? "V" : provider == "bing" ? "M" : provider == "ark" ? "A" : "B");
             }
             source.TextChanged += delegate
             {
@@ -323,6 +319,19 @@ namespace SnapTransOCR
         {
             var button = new GlyphButton(name, title, action) { BackColor = Ui.Background };
             return button;
+        }
+        private void AddServiceCard(string provider, string title, string badge)
+        {
+            var card = new ServiceCard(title, badge) { Visible = enabledProviders.Contains(provider) };
+            card.HeaderClick += delegate
+            {
+                if (!enabledProviders.Contains(provider)) return;
+                if ((!card.IsNotice && card.Value.Length > 0) || String.IsNullOrWhiteSpace(source.Text)) card.SetValue(card.Value, !card.Expanded);
+                else if (ServiceTranslateRequested != null) ServiceTranslateRequested(source.Text, provider);
+            };
+            card.SizeChangedByContent += delegate { if (!clearingResults) LayoutContent(); };
+            card.ScrollRequested += results.ScrollBy;
+            cards.Add(provider, card); results.Controls.Add(card);
         }
         private void RaiseLanguage()
         {
@@ -353,7 +362,7 @@ namespace SnapTransOCR
             int width = ClientSize.Width;
             int statusHeight = String.IsNullOrWhiteSpace(status.Text) ? 0 : S(30);
             // Reserve the vertical gutter before measuring, so its appearance cannot widen or rewrap cards.
-            int cardWidth = Math.Max(1, width - S(32) - GetSystemMetricsForDpi(2, (uint)DeviceDpi));
+            int cardWidth = Math.Max(1, width - S(32) - Math.Max(GetSystemMetricsForDpi(2, (uint)DeviceDpi), SystemInformation.VerticalScrollBarWidth));
             int natural = 0;
             foreach (var pair in cards)
             {
@@ -376,7 +385,8 @@ namespace SnapTransOCR
             for (int i = 0; i < controls.Length; i++) { controls[i].SetBounds(S(12 + i * 44), inputHeight - S(49), S(38), S(38)); controls[i].BackColor = Color.White; }
             format.SetBounds(S(144), inputHeight - S(49), S(38), S(38));
             translate.SetBounds(input.Width - S(68), inputHeight - S(63), S(52), S(52));
-            language.SetBounds(S(16), input.Bottom + S(14), cardWidth, S(52));
+            int languageHeight = Math.Max(S(52), Math.Max(from.GetPreferredSize(Size.Empty).Height, to.GetPreferredSize(Size.Empty).Height) + S(22));
+            language.SetBounds(S(16), input.Bottom + S(14), cardWidth, languageHeight);
             from.SetBounds(S(12), S(11), language.Width / 2 - S(42), S(28)); to.SetBounds(language.Width / 2 + S(32), S(11), language.Width / 2 - S(44), S(28));
             swap.SetBounds(language.Width / 2 - S(16), S(7), S(32), S(32)); swap.BackColor = Color.White;
             int resultTop = language.Bottom + S(14);
@@ -451,12 +461,26 @@ namespace SnapTransOCR
             if (previousFrom != from.SelectedIndex || previousTo != to.SelectedIndex)
                 ClearResults();
             activeProvider = value.TranslateProvider;
-            providerOrder = AppSettings.NormalizeOrder(value.TranslateServiceOrder, AppSettings.TranslationProviders);
+            string[] extra = value.ExtraArkModels();
+            foreach (string model in extra)
+                if (!cards.ContainsKey("ark:" + model)) AddServiceCard("ark:" + model, "Ark · " + TranslationModels.Caption(model), "A");
+            if (arkModel != value.ArkModel) cards["ark"].SetValue("", false);
+            arkModel = value.ArkModel;
+            cards["ark"].SetCaption(extra.Length == 0 ? AppSettings.TranslationName("ark") : "Ark · " + TranslationModels.Caption(value.ArkModel));
+            var order = new List<string>();
+            foreach (string provider in AppSettings.NormalizeOrder(value.TranslateServiceOrder, AppSettings.TranslationProviders))
+            {
+                order.Add(provider);
+                if (provider == "ark") order.AddRange(extra.Select(model => "ark:" + model));
+            }
+            providerOrder = order.ToArray();
+            foreach (string key in cards.Keys.Where(key => key.StartsWith("ark:", StringComparison.Ordinal) && !extra.Contains(key.Substring(4))).ToArray())
+            { var card = cards[key]; cards.Remove(key); results.Controls.Remove(card); card.Dispose(); }
             for (int i = 0; i < providerOrder.Length; i++) results.Controls.SetChildIndex(cards[providerOrder[i]], i);
             enabledProviders.Clear();
             foreach (var pair in cards)
             {
-                bool enabled = value.IsTranslationEnabled(pair.Key);
+                bool enabled = pair.Key.StartsWith("ark:", StringComparison.Ordinal) ? value.ArkEnabled : value.IsTranslationEnabled(pair.Key);
                 if (enabled) enabledProviders.Add(pair.Key);
                 pair.Value.Visible = enabled;
             }
@@ -481,7 +505,8 @@ namespace SnapTransOCR
             finally { settingSource = false; }
         }
         public void SetActiveProvider(string provider) { activeProvider = provider; }
-        public void SetOutput(string value) { if (enabledProviders.Contains(activeProvider)) cards[activeProvider].SetValue(value, true); }
+        public void SetOutput(string value, string provider = null) { string key = provider ?? activeProvider; if (enabledProviders.Contains(key)) cards[key].SetValue(value, true); }
+        public void SetNotice(string provider, string value) { if (enabledProviders.Contains(provider)) cards[provider].SetNotice(value); }
         public void SetStatus(string value) { status.Text = value; status.Visible = !String.IsNullOrWhiteSpace(value); LayoutContent(); }
         public void Busy(bool value) { busy = value; translate.Enabled = value || enabledProviders.Count > 0; translate.Glyph = value ? "stop" : "translate"; translate.Invalidate(); }
         protected override void WndProc(ref Message message)

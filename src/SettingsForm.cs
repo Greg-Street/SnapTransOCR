@@ -9,26 +9,42 @@ namespace SnapTransOCR
 {
     internal sealed class RetentionInput : RoundedPanel
     {
-        private readonly NumericUpDown input;
+        internal const int Minimum = 1, Maximum = 3650;
+        private readonly TextBox input;
         private readonly GlyphButton decrease, increase;
         private readonly Label unit;
-        internal RetentionInput(NumericUpDown value)
+        internal event EventHandler ValueChanged;
+        internal int Value
         {
-            input = value;
+            get
+            {
+                int value;
+                if (!Int32.TryParse(input.Text.Trim(), out value) || value < Minimum || value > Maximum)
+                    throw new FormatException("历史保存天数请输入 1–3650 的整数。");
+                return value;
+            }
+            set { input.Text = Math.Max(Minimum, Math.Min(Maximum, value)).ToString(); }
+        }
+        internal RetentionInput(int value)
+        {
+            input = new TextBox { BorderStyle = BorderStyle.None, TextAlign = HorizontalAlignment.Center, BackColor = Color.White, Font = Ui.Font, MaxLength = 4, AccessibleName = "历史保存天数" };
+            Value = value;
             Fill = Color.White; BorderColor = Color.FromArgb(216, 220, 227); Radius = 8;
             Size = new Size(240, 38); TabStop = false;
-            input.BorderStyle = BorderStyle.None; input.TextAlign = HorizontalAlignment.Center; input.BackColor = Color.White;
-            decrease = new GlyphButton("line", "减少一天", delegate { input.Value = Math.Max(input.Minimum, input.Value - 1); input.Focus(); }) { BackColor = Color.White, TabStop = false };
-            increase = new GlyphButton("plus", "增加一天", delegate { input.Value = Math.Min(input.Maximum, input.Value + 1); input.Focus(); }) { BackColor = Color.White, TabStop = false };
+            decrease = new GlyphButton("line", "减少一天", delegate { Step(-1); }) { BackColor = Color.White, TabStop = false };
+            increase = new GlyphButton("plus", "增加一天", delegate { Step(1); }) { BackColor = Color.White, TabStop = false };
             unit = new Label { Text = "天", ForeColor = Ui.Muted, BackColor = Color.White, TextAlign = ContentAlignment.MiddleCenter };
             Controls.AddRange(new Control[] { input, decrease, unit, increase });
-            input.Layout += delegate { HideNativeButtons(); };
-            HideNativeButtons();
+            input.TextChanged += delegate { if (ValueChanged != null) ValueChanged(this, EventArgs.Empty); };
+            input.KeyPress += delegate(object sender, KeyPressEventArgs e) { if (!Char.IsControl(e.KeyChar) && (e.KeyChar < '0' || e.KeyChar > '9')) e.Handled = true; };
             MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) input.Focus(); };
         }
-        private void HideNativeButtons()
+        private void Step(int change)
         {
-            foreach (Control child in input.Controls) if (!(child is TextBoxBase)) child.Visible = false;
+            int value;
+            if (!Int32.TryParse(input.Text, out value)) value = 7;
+            Value = Math.Max(Minimum, Math.Min(Maximum, value)) + change;
+            input.Focus();
         }
         protected override void OnLayout(LayoutEventArgs e)
         {
@@ -41,7 +57,6 @@ namespace SnapTransOCR
             unit.SetBounds(increase.Left - Ui.Scale(this, 30), Ui.Scale(this, 4), Ui.Scale(this, 24), Height - Ui.Scale(this, 8));
             int left = decrease.Right + gap;
             input.SetBounds(left, (Height - input.PreferredHeight) / 2, Math.Max(Ui.Scale(this, 40), unit.Left - left - gap), input.PreferredHeight);
-            HideNativeButtons();
         }
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -93,15 +108,16 @@ namespace SnapTransOCR
         private readonly Dictionary<string, NavButton> navigation = new Dictionary<string, NavButton>();
         private readonly Panel sidebar, header, body, footer;
         private readonly Label pageTitle, brand, version, saveStatus;
-        private readonly ComboBox ocr, translator, target, source, stroke, arkModel, arkApiMode, baiduMode, baiduDomain, imageTranslator, imageTarget;
+        private readonly ComboBox ocr, translator, target, source, stroke, captureBorder, arkModel, arkApiMode, baiduMode, baiduDomain, imageTranslator, imageTarget;
         private static readonly string[] arkApiModes = { "auto", "seed", "chat" };
         private static readonly string[] imageTargets = { "zh", "en", "ja", "ko", "fr", "de", "ru", "es" };
         private readonly ServiceOrderControl translationOrder, recognitionOrder;
+        private readonly ArkModelSelection arkModels;
         private readonly Action<AppSettings> save;
         private readonly GlyphButton close, minimize, openHistory;
         private readonly Button saveButton, cancelButton;
         private readonly HistoryView historyView;
-        private readonly NumericUpDown historyRetention;
+        private readonly RetentionInput historyRetention;
         private bool ready, arranging, refreshingHistory, historyLoaded;
         private FlowLayoutPanel arrangedPage;
         private int arrangedWidth, arrangedDpi;
@@ -114,7 +130,7 @@ namespace SnapTransOCR
             sidebar = new BufferedPanel { BackColor = Color.FromArgb(250, 250, 251), Dock = DockStyle.Left, Width = 208, AutoScroll = true };
             header = new BufferedPanel { BackColor = Ui.Background, Dock = DockStyle.Top, Height = 54, Width = 790 };
             body = new BufferedPanel { AutoScroll = true, BackColor = Ui.Background, Dock = DockStyle.Fill };
-            footer = new BufferedFlowPanel { BackColor = Ui.Background, Dock = DockStyle.Bottom, Height = 70, Width = 790, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(26, 16, 26, 16) };
+            footer = new BufferedFlowPanel { BackColor = Ui.Background, Dock = DockStyle.Bottom, Height = 80, Width = 790, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(26, 16, 26, 16) };
             pageTitle = new Label { Text = "常规设置", Font = new Font("Microsoft YaHei UI", 13F), AutoSize = true, Location = new Point(27, 16) };
             header.Controls.Add(pageTitle);
             header.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) Shapes.Drag(this); };
@@ -126,7 +142,7 @@ namespace SnapTransOCR
             close.Anchor = minimize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             header.Controls.Add(close); header.Controls.Add(minimize); header.Controls.Add(openHistory);
             brand = new Label { Text = "SnapTransOCR", AutoSize = true, Font = new Font("Segoe UI", 17F, FontStyle.Bold), ForeColor = Ui.Accent, Location = new Point(18, 38) };
-            version = new Label { Text = "SnapTransOCR  0.2.21", ForeColor = Ui.Muted, AutoSize = true, Location = new Point(44, 86), Font = new Font("Segoe UI", 9F) };
+            version = new Label { Text = "SnapTransOCR  0.2.29", ForeColor = Ui.Muted, AutoSize = true, Location = new Point(44, 86), Font = new Font("Segoe UI", 9F) };
             sidebar.Controls.Add(brand); sidebar.Controls.Add(version);
             string[] titles = { "常规设置", "热键设置", "截图设置", "翻译设置", "识别设置", "历史记录", "关于" };
             string[] icons = { "general", "keyboard", "crop", "translate", "ocr", "history", "info" };
@@ -147,8 +163,8 @@ namespace SnapTransOCR
             Row(card, "运行方式", "关闭翻译窗口后留在托盘；右键托盘图标打开截图、贴图和设置。", Ui.Label("托盘运行"));
             Row(card, "开机自启动", "登录 Windows 后自动在托盘启动。", Toggle("StartWithWindows", settings.StartWithWindows));
             Row(card, "历史与剪贴板", "开关立即生效，记录截图、翻译及其他软件复制的文字和图片。关闭仅停止新增，过期内容仍自动清理。", Toggle("HistoryEnabled", settings.HistoryEnabled));
-            historyRetention = new NumericUpDown { Minimum = 1, Maximum = 3650, Value = Math.Max(1, Math.Min(3650, settings.HistoryRetentionDays)), Width = 120, Font = Ui.Font, AccessibleName = "历史保存天数" };
-            Row(card, "历史保存天数", "直接输入 1–3650 天，默认 7 天；保存设置后生效，缩短时自动清理超期记录。", new RetentionInput(historyRetention));
+            historyRetention = new RetentionInput(settings.HistoryRetentionDays);
+            Row(card, "历史保存天数", "直接输入 1–3650 天，默认 7 天；保存设置后生效，缩短时自动清理超期记录。", historyRetention);
             ocr = Ui.Combo(new[] { "百度 OCR", "腾讯 OCR" }, settings.OcrProvider == "tencent" ? 1 : 0);
             translator = Ui.Combo(Array.ConvertAll(AppSettings.TranslationProviders, AppSettings.TranslationName), Math.Max(0, Array.IndexOf(AppSettings.TranslationProviders, settings.TranslateProvider)));
 
@@ -168,6 +184,12 @@ namespace SnapTransOCR
             var capture = pages["截图设置"]; Section(capture, "截图与标注"); card = Card(capture);
             Row(card, "完成时复制图片", "保存或置顶贴图时，同时将完成的截图复制到剪贴板。", Toggle("ScreenshotCopyOnConfirm", settings.ScreenshotCopyOnConfirm));
             Row(card, "显示选区放大镜", "框选时放大鼠标附近的像素，便于对齐边缘。", Toggle("CaptureMagnifier", settings.CaptureMagnifier));
+            Row(card, "截图显示鼠标指针", "将开始截图时的指针保存在图片中，截图时按 F2 临时切换。", Toggle("CaptureCursor", settings.CaptureCursor));
+            Row(card, "显示截图快捷键提示", "左下角显示操作提示，截图时可按 F1 或点击关闭图标隐藏。", Toggle("CaptureShortcutHints", settings.CaptureShortcutHints));
+            var borders = new string[12];
+            for (int index = 0; index < borders.Length; index++) borders[index] = (index + 1) + " 像素";
+            captureBorder = Ui.Combo(borders, Math.Max(0, Math.Min(11, settings.CaptureBorderWidth - 1)));
+            Row(card, "选区边框宽度", "调整截图时选区轮廓的粗细，以屏幕像素计。", captureBorder);
             var widths = new string[20];
             for (int index = 0; index < widths.Length; index++) widths[index] = (index + 1) + " 像素";
             stroke = Ui.Combo(widths, Math.Max(0, Math.Min(19, settings.CaptureStroke - 1)));
@@ -239,14 +261,16 @@ namespace SnapTransOCR
                 string name = model.Name;
                 int category = name.IndexOf(" · ", StringComparison.Ordinal);
                 string title = category < 0 ? name : name.Substring(category + 3);
-                arkModel.Items.Add(name.StartsWith("即将下线", StringComparison.Ordinal) ? title + "（即将下线）" : title);
+                if (name.StartsWith("已下线", StringComparison.Ordinal)) title += "（已下线）";
+                else if (name.StartsWith("即将下线", StringComparison.Ordinal)) title += "（即将下线）";
+                arkModel.Items.Add(title);
             }
             arkModel.Items.Add("自定义 Model ID / 接入点…");
             arkModel.Tag = Array.ConvertAll(TranslationModels.Ark, model => model.Id);
             var savedModel = TranslationModels.Find(settings.ArkModel);
             arkModel.SelectedIndex = savedModel == null ? TranslationModels.Ark.Length : Array.IndexOf((string[])arkModel.Tag, savedModel.Id);
             arkModel.DropDownWidth = 360;
-            Row(card, "文本模型", "选择文本模型；列表支持键盘前缀查找，悬停可查看完整模型 ID。", arkModel);
+            Row(card, "默认模型", "首个译文与图片原位翻译使用此模型；悬停可查看完整模型 ID。", arkModel);
             var customModel = Input("ArkModel", settings.ArkModel, false);
             Row(card, "自定义 Model ID", "填写已开通的模型 ID 或 ep-* 推理接入点。", customModel);
             TableLayoutPanel arkCard = card;
@@ -256,13 +280,15 @@ namespace SnapTransOCR
                 string id = ArkModelId(); var known = TranslationModels.Find(id);
                 modelHint.SetToolTip(arkModel, known == null ? id : known.DisplayName); arkModel.AccessibleDescription = id;
             };
-            Action refreshModelChoice = delegate { ShowRows(arkCard, 3, 1, arkModel.SelectedIndex == TranslationModels.Ark.Length); updateModelHint(); Arrange(true); };
+            Action refreshModelChoice = delegate { ShowRows(arkCard, 3, 1, arkModel.SelectedIndex == TranslationModels.Ark.Length); updateModelHint(); if (arkModels != null) arkModels.SetPrimary(ArkModelId()); Arrange(true); };
             arkModel.SelectedIndexChanged += delegate { refreshModelChoice(); };
-            customModel.TextChanged += delegate { updateModelHint(); }; refreshModelChoice();
+            customModel.TextChanged += delegate { updateModelHint(); if (arkModels != null) arkModels.SetPrimary(ArkModelId()); }; refreshModelChoice();
             Disposed += delegate { modelHint.Dispose(); };
             arkApiMode = Ui.Combo(new[] { "自动识别", "专用翻译（Seed）", "通用文本（Chat）" }, Math.Max(0, Array.IndexOf(arkApiModes, settings.ArkApiMode)));
             arkApiMode.AccessibleName = "ArkApiMode";
             Row(card, "调用协议", "使用 ep-* 接入点时，按其实际模型选择协议。自动模式仅从公开模型 ID 判断。", arkApiMode);
+            arkModels = new ArkModelSelection(settings.ExtraArkModels(), settings.ArkModel);
+            Row(card, "额外并行模型", "勾选后与默认模型同时翻译，分别显示译文。共用上方 API Key，各自消耗对应模型额度；未勾选不调用。", arkModels);
             Note(services, "Seed Translation 使用专用翻译协议；其他文本模型使用翻译指令。模型可用性和用量以方舟控制台为准。");
             MarkService(services, groupStart, "ark");
 
@@ -305,7 +331,7 @@ namespace SnapTransOCR
             recognitionOrder.OrderChanged += delegate { ReorderServices(ocrServices, recognitionOrder.Order); RefreshServices(); Arrange(true); };
             ReorderServices(services, translationOrder.Order); ReorderServices(ocrServices, recognitionOrder.Order);
             Section(pages["关于"], "SnapTransOCR"); card = Card(pages["关于"]);
-            Row(card, "截图、贴图、OCR 与翻译", "按需截图与云端识别，原生界面，无浏览器内核和本地识别模型。", Ui.Label("0.2.21"));
+            Row(card, "截图、贴图、OCR 与翻译", "按需截图与云端识别，原生界面，无浏览器内核和本地识别模型。", Ui.Label("0.2.29"));
             Note(pages["关于"], "仅在你点击识别或翻译时请求对应 API 服务。历史记录保存在本机，可关闭记录或清空，不会上传历史。");
 
             historyView = new HistoryView(historyStore ?? new HistoryStore(retentionDays: () => Value.HistoryRetentionDays), settings.HistoryEnabled);
@@ -315,6 +341,8 @@ namespace SnapTransOCR
             toggles["HistoryEnabled"].CheckedChanged += delegate { if (!refreshingHistory) ChangeHistoryRecording(toggles["HistoryEnabled"].Checked); };
 
             saveButton = Ui.Button("保存设置", Save, true); cancelButton = Ui.Button("取消", Close);
+            saveButton.AutoSize = cancelButton.AutoSize = false;
+            saveButton.MinimumSize = cancelButton.MinimumSize = Size.Empty;
             saveButton.Margin = new Padding(10, 0, 0, 0); cancelButton.Margin = Padding.Empty;
             saveStatus = new Label { AutoSize = true, ForeColor = Ui.Muted, Margin = new Padding(8, 9, 8, 0) };
             footer.Controls.Add(saveButton); footer.Controls.Add(cancelButton); footer.Controls.Add(saveStatus);
@@ -322,10 +350,11 @@ namespace SnapTransOCR
             historyRetention.ValueChanged += clearSaved;
             foreach (TextBox field in fields.Values) field.TextChanged += clearSaved;
             foreach (ToggleSwitch item in toggles.Values) item.CheckedChanged += clearSaved;
-            foreach (ComboBox item in new[] { source, target, ocr, translator, stroke, arkModel, arkApiMode, baiduDomain, imageTranslator, imageTarget }) item.SelectedIndexChanged += clearSaved;
+            foreach (ComboBox item in new[] { source, target, ocr, translator, stroke, captureBorder, arkModel, arkApiMode, baiduDomain, imageTranslator, imageTarget }) item.SelectedIndexChanged += clearSaved;
             arkModel.TextChanged += clearSaved;
             translationOrder.OrderChanged += delegate { saveStatus.Text = ""; };
             recognitionOrder.OrderChanged += delegate { saveStatus.Text = ""; };
+            arkModels.Changed += delegate { saveStatus.Text = ""; };
             Controls.Add(body); Controls.Add(header); Controls.Add(footer); Controls.Add(sidebar);
             body.SizeChanged += delegate { Arrange(); };
             RefreshServices();
@@ -443,7 +472,6 @@ namespace SnapTransOCR
                 card.RowStyles[row].Height = 0;
                 card.GetControlFromPosition(0, row).Visible = visible;
                 Control value = card.GetControlFromPosition(1, row);
-                if (visible && value is ToggleSwitch) value.Size = new Size(Ui.Scale(card, 46), Ui.Scale(card, 28));
                 value.Visible = visible;
             }
             card.ResumeLayout(true);
@@ -477,7 +505,10 @@ namespace SnapTransOCR
             arranging = true;
             SuspendLayout();
             sidebar.Width = Ui.Scale(this, 208);
-            header.Height = Ui.Scale(this, 54); footer.Height = Ui.Scale(this, 70);
+            header.Height = Ui.Scale(this, 54); footer.Height = Ui.Scale(this, 80);
+            footer.Padding = new Padding(Ui.Scale(this, 26), Ui.Scale(this, 16), Ui.Scale(this, 26), Ui.Scale(this, 16));
+            saveButton.Size = cancelButton.Size = new Size(Ui.Scale(this, 124), Ui.Scale(this, 40));
+            saveButton.Margin = new Padding(Ui.Scale(this, 10), 0, 0, 0); cancelButton.Margin = Padding.Empty;
             ResumeLayout(true);
             sidebar.AutoScrollMinSize = new Size(0, Ui.Scale(this, 136 + navigation.Count * 48));
             brand.Location = new Point(Ui.Scale(this, 18), Ui.Scale(this, 38) + sidebar.AutoScrollPosition.Y);
@@ -500,7 +531,7 @@ namespace SnapTransOCR
             }
             else if (contentChanged || arrangedPage != page || arrangedWidth != body.Width || arrangedDpi != DeviceDpi)
             {
-                page.Width = Math.Max(1, body.Width - Ui.Scale(this, 20));
+                page.Width = Math.Max(1, body.Width - Math.Max(Ui.Scale(this, 20), SystemInformation.VerticalScrollBarWidth));
                 int width = Math.Max(1, page.Width - page.Padding.Horizontal);
                 foreach (Control control in page.Controls)
                 {
@@ -521,7 +552,9 @@ namespace SnapTransOCR
                             foreach (Control label in text.Controls) label.Size = label.GetPreferredSize(new Size(textWidth, 0));
                             text.ResumeLayout(true);
                             Control value = table.GetControlFromPosition(1, row);
-                            if (value is TextInputField || value is ComboBox || value is ServiceOrderControl) value.Width = Math.Min(Ui.Scale(this, value is ComboBox && value != arkModel && value != baiduMode ? 170 : 250), valueWidth);
+                            if (value is ToggleSwitch) value.Size = new Size(Ui.Scale(value, 46), Ui.Scale(value, 28));
+                            else if (value is RetentionInput) value.Width = Math.Min(Ui.Scale(this, 240), valueWidth);
+                            else if (value is TextInputField || value is ComboBox || value is ServiceOrderControl || value is ArkModelSelection) value.Width = Math.Min(Ui.Scale(this, value is ComboBox && value != arkModel && value != baiduMode ? 170 : 250), valueWidth);
                             else if (value is Label) value.MaximumSize = new Size(valueWidth, 0);
                         }
                         table.ResumeLayout(true);
@@ -587,8 +620,10 @@ namespace SnapTransOCR
                 next.SourceLanguage = sources[source.SelectedIndex];
                 next.TargetLanguage = targets[target.SelectedIndex];
                 next.CaptureStroke = stroke.SelectedIndex + 1;
+                next.CaptureBorderWidth = captureBorder.SelectedIndex + 1;
                 next.HistoryRetentionDays = (int)historyRetention.Value;
                 next.ArkModel = ArkModelId();
+                next.ArkExtraModels = arkModels.SelectedModels;
                 next.ArkApiMode = arkApiModes[arkApiMode.SelectedIndex];
                 next.BaiduDomain = AppSettings.BaiduDomains[baiduDomain.SelectedIndex];
                 next.ImageTranslateProvider = imageTranslator.SelectedIndex == 1 ? "baidu_image" : "pipeline";
@@ -604,6 +639,7 @@ namespace SnapTransOCR
                 source.SelectedIndex = Math.Max(0, Array.IndexOf(sources, Value.SourceLanguage));
                 target.SelectedIndex = Math.Max(0, Array.IndexOf(targets, Value.TargetLanguage));
                 stroke.SelectedIndex = Math.Max(0, Math.Min(19, Value.CaptureStroke - 1));
+                captureBorder.SelectedIndex = Math.Max(0, Math.Min(11, Value.CaptureBorderWidth - 1));
                 saveStatus.Text = "设置已保存";
             }
             catch (Exception ex) { saveStatus.Text = "保存未完成"; Ui.Error(this, ex); }

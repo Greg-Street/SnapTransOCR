@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -37,6 +38,7 @@ namespace SnapTransOCR
             await ArkProtocolsAndCache(check).ConfigureAwait(false);
             await SeedChunking(check).ConfigureAwait(false);
             await BaiduLlmAuthentication(check).ConfigureAwait(false);
+            await BaiduBlankLines(check).ConfigureAwait(false);
             await DomainSigning(check).ConfigureAwait(false);
             await BaiduChunkingAndDisabledProviders(check).ConfigureAwait(false);
             await BlockIdentity(check).ConfigureAwait(false);
@@ -46,6 +48,7 @@ namespace SnapTransOCR
             await OutputSizeLimit(check).ConfigureAwait(false);
             await BlockOutputSizeLimit(check).ConfigureAwait(false);
             await GeneralTranslationPrompt(check).ConfigureAwait(false);
+            await TranslationThinkingControl(check).ConfigureAwait(false);
             await FailuresAndCancellation(check).ConfigureAwait(false);
         }
 
@@ -127,6 +130,30 @@ namespace SnapTransOCR
                 bool rejected = false;
                 try { await api.Translate(settings, "new text", CancellationToken.None).ConfigureAwait(false); } catch (InvalidOperationException) { rejected = true; }
                 check(rejected && bodies.Count == 3, "oversized Baidu instruction fails before sending HTTP");
+            }
+        }
+
+        private static async Task BaiduBlankLines(Action<bool, string> check)
+        {
+            foreach (string provider in new[] { "baidu_llm", "baidu_domain" })
+            {
+                string response = "{\"trans_result\":[{\"src\":\"First\",\"dst\":\"第一段\"},{\"src\":\"\",\"dst\":\"\"},{\"src\":\"Last\",\"dst\":\"末段\"}]}";
+                using (var api = new CloudApi(new Handler { Handle = (request, cancellation) => Task.FromResult(Response(response)) }))
+                {
+                    string actual = await api.Translate(Settings(provider), "First\n\nLast", CancellationToken.None).ConfigureAwait(false);
+                    check(actual == "第一段" + Environment.NewLine + Environment.NewLine + "末段", provider + " preserves an empty paragraph between valid translations");
+                }
+                foreach (string broken in new[] {
+                    "{\"trans_result\":[{\"src\":\"First\",\"dst\":\"第一段\"},{\"src\":\"missing translation\",\"dst\":\"\"}]}",
+                    "{\"trans_result\":[{\"src\":\"\"}]}",
+                    "{\"trans_result\":[{\"src\":\"\",\"dst\":\"\"}]}" })
+                using (var api = new CloudApi(new Handler { Handle = (request, cancellation) => Task.FromResult(Response(broken)) }))
+                {
+                    bool rejected = false;
+                    try { await api.Translate(Settings(provider), "First", CancellationToken.None).ConfigureAwait(false); }
+                    catch (InvalidOperationException) { rejected = true; }
+                    check(rejected, provider + " still rejects missing text, malformed blank rows, and wholly empty results");
+                }
             }
         }
 
@@ -320,6 +347,26 @@ namespace SnapTransOCR
                 try { await api.TranslateBlocks(Settings("ark"), new[] { "one", "two", "three" }, CancellationToken.None).ConfigureAwait(false); }
                 catch (InvalidOperationException) { rejected = true; }
                 check(rejected && requests == 2, "extended block translation rejects aggregate output above 2000000 characters before requesting third block");
+            }
+        }
+
+        private static async Task TranslationThinkingControl(Action<bool, string> check)
+        {
+            foreach (string model in TranslationModels.Ark.Where(value => value.Protocol == "chat").Select(value => value.Id).Concat(new[] { "ep-unknown" }))
+            {
+                var handler = new Handler { Handle = async (request, cancellation) =>
+                {
+                    var body = Json.Object(await request.Content.ReadAsStringAsync());
+                    var thinking = Json.Map(Json.Get(body, "thinking"));
+                    bool supported = TranslationModels.Find(model) != null && TranslationModels.Find(model).DisableThinking;
+                    check(supported ? Json.Text(thinking, "type") == "disabled" : thinking == null, "translation disables reasoning only for a verified supported model: " + model);
+                    return Response(ChatResponse);
+                } };
+                using (var api = new CloudApi(handler))
+                {
+                    var settings = Settings("ark"); settings.ArkModel = model;
+                    await api.Translate(settings, "hello", CancellationToken.None).ConfigureAwait(false);
+                }
             }
         }
 

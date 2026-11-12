@@ -14,6 +14,24 @@ namespace SnapTransOCR
             {
                 try
                 {
+                    foreach (bool oleEmpty in new[] { false, true })
+                    {
+                        if (oleEmpty) Clipboard.SetDataObject(new DataObject(), true); else Clipboard.Clear();
+                        System.Threading.Thread.Sleep(150);
+                        uint sequence = Native.GetClipboardSequenceNumber();
+                        using (var empty = ClipboardSnapshot.Capture())
+                        {
+                            check(empty.Data == null && Native.GetClipboardSequenceNumber() == sequence,
+                                "a logically empty clipboard has a clearable snapshot without changing its native sequence, OLE=" + oleEmpty);
+                            Clipboard.SetText("synthetic empty clipboard roundtrip");
+                            if (empty.Data != null) Clipboard.SetDataObject(empty.Data, true); else Clipboard.Clear();
+                        }
+                        var restored = Clipboard.GetDataObject();
+                        check(restored == null || restored.GetFormats(false).Length == 0,
+                            "restoring an empty clipboard removes the temporary copied text, OLE=" + oleEmpty);
+                        using (var repeated = ClipboardSnapshot.Capture())
+                            check(repeated.Data == null, "an empty clipboard remains readable on the next snapshot, OLE=" + oleEmpty);
+                    }
                     foreach (bool afterValue in new[] { false, true })
                     {
                         IDisposable held = null;

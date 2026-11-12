@@ -25,6 +25,7 @@ namespace SnapTransOCR
         [DllImport("user32.dll")] internal static extern uint GetClipboardSequenceNumber();
         [DllImport("user32.dll")] internal static extern IntPtr GetOpenClipboardWindow();
         [DllImport("user32.dll")] internal static extern int CountClipboardFormats();
+        [DllImport("user32.dll")] internal static extern bool IsClipboardFormatAvailable(int format);
         [DllImport("user32.dll")] internal static extern bool SetProcessDpiAwarenessContext(IntPtr context);
         [DllImport("user32.dll")] internal static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(Point point, uint flags);
@@ -47,8 +48,11 @@ namespace SnapTransOCR
         }
         [DllImport("user32.dll")] internal static extern bool EnumWindows(EnumWindowProc callback, IntPtr parameter);
         [DllImport("user32.dll")] internal static extern bool IsWindowVisible(IntPtr window);
+        [DllImport("user32.dll")] internal static extern bool IsIconic(IntPtr window);
         [DllImport("user32.dll")] internal static extern bool GetWindowRect(IntPtr window, out RECT rectangle);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] internal static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
         [DllImport("dwmapi.dll")] internal static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out RECT rectangle, int size);
+        [DllImport("dwmapi.dll")] internal static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
         internal delegate bool EnumWindowProc(IntPtr window, IntPtr parameter);
         [StructLayout(LayoutKind.Sequential)] internal struct RECT { public int Left, Top, Right, Bottom; public Rectangle Rectangle { get { return Rectangle.FromLTRB(Left, Top, Right, Bottom); } } }
         [DllImport("user32.dll")] internal static extern uint SendInput(uint count, INPUT[] inputs, int size);
@@ -283,6 +287,7 @@ namespace SnapTransOCR
         { return Capture(null); }
         internal static ClipboardSnapshot Capture(IDataObject original)
         {
+            bool ownsImages = original == null;
             uint sequence = Native.GetClipboardSequenceNumber();
             if (Native.GetOpenClipboardWindow() != IntPtr.Zero) throw new ExternalException("剪贴板正被占用。");
             var snapshot = new ClipboardSnapshot();
@@ -290,34 +295,45 @@ namespace SnapTransOCR
             {
                 if (original == null) original = Clipboard.GetDataObject();
                 string[] formats = original == null ? new string[0] : original.GetFormats(false);
-                if (formats.Length == 0 && Native.CountClipboardFormats() != 0) throw new ExternalException("剪贴板格式暂时无法读取。");
-                if (original == null) return snapshot;
+                if (formats.Length == 0)
+                {
+                    // OLE can publish these internal markers even when it exposes no application data.
+                    int remaining = Native.CountClipboardFormats();
+                    if (Native.IsClipboardFormatAvailable(DataFormats.GetFormat("DataObject").Id)) remaining--;
+                    if (Native.IsClipboardFormatAvailable(DataFormats.GetFormat("Ole Private Data").Id)) remaining--;
+                    if (remaining != 0 || Native.GetOpenClipboardWindow() != IntPtr.Zero) throw new ExternalException("剪贴板格式暂时无法读取。");
+                    if (Native.GetClipboardSequenceNumber() != sequence) throw new InvalidOperationException("剪贴板内容已更新。");
+                    return snapshot;
+                }
                 snapshot.Data = new DataObject();
                 long size = 0;
                 foreach (string format in formats)
                 {
                     if (Native.GetOpenClipboardWindow() != IntPtr.Zero) throw new ExternalException("剪贴板正被占用。");
                     object value = original.GetData(format, false);
-                    if (Native.GetOpenClipboardWindow() != IntPtr.Zero) throw new ExternalException("剪贴板正被占用。");
-                    // An empty result is ambiguous: OLE can silently return it during a competing clipboard read.
-                    // Refuse the temporary copy rather than risk replacing existing content with an incomplete snapshot.
-                    if (value == null || value is string && ((string)value).Length == 0) throw new ExternalException("剪贴板内容暂时无法完整读取。");
-                    if (value is Image)
+                    using (Image temporaryImage = ownsImages ? value as Image : null)
                     {
-                        var image = (Image)value;
-                        size += (long)image.Width * image.Height * 4;
-                        if (size > 64 * 1024 * 1024) throw new InvalidOperationException("剪贴板图片较大，为保留原内容，请手动复制选中文字到主窗口翻译。");
-                        value = image.Clone();
+                        if (Native.GetOpenClipboardWindow() != IntPtr.Zero) throw new ExternalException("剪贴板正被占用。");
+                        // An empty result is ambiguous: OLE can silently return it during a competing clipboard read.
+                        // Refuse the temporary copy rather than risk replacing existing content with an incomplete snapshot.
+                        if (value == null || value is string && ((string)value).Length == 0) throw new ExternalException("剪贴板内容暂时无法完整读取。");
+                        if (value is Image)
+                        {
+                            var image = (Image)value;
+                            size += (long)image.Width * image.Height * 4;
+                            if (size > 64 * 1024 * 1024) throw new InvalidOperationException("剪贴板图片较大，为保留原内容，请手动复制选中文字到主窗口翻译。");
+                            value = image.Clone();
+                        }
+                        else if (value is MemoryStream) { value = new MemoryStream(((MemoryStream)value).ToArray()); size += ((MemoryStream)value).Length; }
+                        else if (value is byte[]) { value = ((byte[])value).Clone(); size += ((byte[])value).Length; }
+                        else if (value is string) size += ((string)value).Length * 2L;
+                        else if (value is string[]) value = ((string[])value).Clone();
+                        else if (!value.GetType().IsPrimitive)
+                            throw new InvalidOperationException("当前剪贴板含无法完整恢复的格式，为保留原内容，请手动复制选中文字到主窗口翻译。");
+                        if (value is IDisposable) snapshot.owned.Add((IDisposable)value);
+                        if (size > 64 * 1024 * 1024) throw new InvalidOperationException("剪贴板内容较大，为保留原内容，请手动复制选中文字到主窗口翻译。");
+                        snapshot.Data.SetData(format, false, value);
                     }
-                    else if (value is MemoryStream) { value = new MemoryStream(((MemoryStream)value).ToArray()); size += ((MemoryStream)value).Length; }
-                    else if (value is byte[]) { value = ((byte[])value).Clone(); size += ((byte[])value).Length; }
-                    else if (value is string) size += ((string)value).Length * 2L;
-                    else if (value is string[]) value = ((string[])value).Clone();
-                    else if (!value.GetType().IsPrimitive)
-                        throw new InvalidOperationException("当前剪贴板含无法完整恢复的格式，为保留原内容，请手动复制选中文字到主窗口翻译。");
-                    if (value is IDisposable) snapshot.owned.Add((IDisposable)value);
-                    if (size > 64 * 1024 * 1024) throw new InvalidOperationException("剪贴板内容较大，为保留原内容，请手动复制选中文字到主窗口翻译。");
-                    snapshot.Data.SetData(format, false, value);
                 }
                 if (Native.GetClipboardSequenceNumber() != sequence) throw new InvalidOperationException("剪贴板内容已更新。");
                 return snapshot;

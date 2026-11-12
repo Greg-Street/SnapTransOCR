@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Reflection;
@@ -15,9 +16,10 @@ namespace SnapTransOCR
             using (var form = new SettingsForm(settings, value => saved = value))
             {
                 check(Descendants(form).OfType<TextBox>().All(text => text.BorderStyle == BorderStyle.None && text.Parent is RoundedPanel), "all settings inputs share a rounded border without native inset edges");
-                var wrappers = Descendants(form).OfType<TextInputField>().Where(field => field.Controls.OfType<GlyphButton>().Any()).ToArray();
+                var inputs = Descendants(form).OfType<TextInputField>().ToArray();
+                var wrappers = CredentialFields(form).ToArray();
                 check(wrappers.Length == 10 && wrappers.All(field => field.Controls.OfType<TextBox>().Single().UseSystemPasswordChar), "all ten credentials start masked with a visibility button");
-                check(Descendants(form).OfType<TextInputField>().Count() == 22 && Descendants(form).OfType<TextBox>().Count(control => !control.UseSystemPasswordChar && !control.Parent.Controls.OfType<GlyphButton>().Any()) == 12, "hotkey fields, history search, translation instruction and custom model ID share the rounded input style without password icons");
+                check(inputs.Length == 22 && inputs.Count(field => !field.Controls.OfType<TextBox>().Single().UseSystemPasswordChar) == 12, "hotkey fields, history search, translation instruction and custom model ID share the rounded input style without password icons");
                 foreach (var field in wrappers)
                 {
                     var text = field.Controls.OfType<TextBox>().Single();
@@ -42,7 +44,7 @@ namespace SnapTransOCR
                 check(saved != null && saved.VolcSecret == "edited-example-secret" && saved.VolcId == settings.VolcId && saved.Hotkeys[0] == "Ctrl+Shift+F9", "rounded credential and hotkey edits save through the original field references");
             }
             using (var reopened = new SettingsForm(saved, delegate { }))
-                check(Descendants(reopened).OfType<TextInputField>().Where(field => field.Controls.OfType<GlyphButton>().Any()).All(field => field.Controls.OfType<TextBox>().Single().UseSystemPasswordChar), "new settings windows mask credentials again after a visible save");
+                check(CredentialFields(reopened).All(field => field.Controls.OfType<TextBox>().Single().UseSystemPasswordChar), "new settings windows mask credentials again after a visible save");
             using (var form = new SettingsForm(settings, delegate { }) { StartPosition = FormStartPosition.Manual, Location = new Point(-30000, -30000), ShowInTaskbar = false })
             {
                 form.SelectPage("识别设置"); form.Show(); Application.DoEvents();
@@ -82,13 +84,17 @@ namespace SnapTransOCR
         private static bool Fits(TextInputField field, int dpi)
         {
             var text = field.Controls.OfType<TextBox>().Single();
-            var button = field.Controls.OfType<GlyphButton>().SingleOrDefault();
+            var button = field.Controls.OfType<GlyphButton>().SingleOrDefault(control => control.Visible);
             bool widthFits = text.AccessibleName == "搜索历史原文或译文"
                 ? field.Left >= 0 && field.Right <= field.Parent.ClientSize.Width
                 : field.Width <= 250 * dpi / 96;
             return widthFits && text.Left >= 10 * dpi / 96 && text.Top > 0
                 && (button == null || text.Right < button.Left)
                 && field.Controls.Cast<Control>().All(control => control.Left >= 0 && control.Right < field.ClientSize.Width && control.Bottom < field.ClientSize.Height);
+        }
+        private static IEnumerable<TextInputField> CredentialFields(Control parent)
+        {
+            return Descendants(parent).OfType<TextInputField>().Where(field => field.Controls.OfType<GlyphButton>().Any(button => button.Glyph == "eye" || button.Glyph == "eye-off"));
         }
         private static System.Collections.Generic.IEnumerable<Control> Descendants(Control parent)
         {

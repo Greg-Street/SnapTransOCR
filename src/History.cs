@@ -5,6 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,11 +23,15 @@ namespace SnapTransOCR
         public string Translation { get; set; }
         public string ImageFile { get; set; }
         public string ContentHash { get; set; }
+        internal HistoryEntry Copy() { return (HistoryEntry)MemberwiseClone(); }
     }
 
     internal sealed class HistoryStore
     {
         internal const int RetentionDays = 7, MaxTextBytes = 16 * 1024 * 1024;
+        private const int MaxCachedIndexBytes = 4 * 1024 * 1024;
+        private byte[] cachedHash;
+        private HistoryEntry[] cachedEntries;
         private string directory, indexPath;
         private readonly string legacyDirectory;
         private readonly Func<DateTime> utcNow;
@@ -34,6 +39,7 @@ namespace SnapTransOCR
         private DateTime? operationCutoff;
         private bool initialized, changed;
         private readonly SemaphoreSlim gate = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim imageGate = new SemaphoreSlim(1, 1);
         internal event Action Changed;
 
         internal HistoryStore(string directory = null, Func<DateTime> utcNow = null, string legacyDirectory = null, Func<int> retentionDays = null)
@@ -69,22 +75,18 @@ namespace SnapTransOCR
                     CleanupImages(previous);
                     return true;
                 }
-                int bytes = 2 + Encoding.UTF8.GetByteCount(Json.Write(entry));
-                if (bytes > MaxTextBytes) return false;
-                var entries = new List<HistoryEntry> { entry };
-                foreach (HistoryEntry item in previous)
-                {
-                    int next = Encoding.UTF8.GetByteCount(Json.Write(item)) + 1;
-                    // Preserve records within the selected retention period rather than silently evicting recent copies.
-                    if (bytes + next > MaxTextBytes) return false;
-                    entries.Add(item); bytes += next;
-                }
+                var entries = new HistoryEntry[previous.Length + 1];
+                entries[0] = entry;
+                Array.Copy(previous, 0, entries, 1, previous.Length);
+                string serialized = Json.Write(entries);
+                // Serialize once for both the exact capacity check and the atomic write.
+                if (Encoding.UTF8.GetByteCount(serialized) > MaxTextBytes) return false;
                 Directory.CreateDirectory(directory);
                 string imagePath = ImagePath(entry), temporary = imagePath == null ? null : imagePath + ".tmp";
                 try
                 {
                     if (image != null) { image.Save(temporary, ImageFormat.Png); File.Move(temporary, imagePath); }
-                    Write(entries.ToArray());
+                    Write(entries, serialized);
                     changed = true;
                 }
                 catch
@@ -93,7 +95,7 @@ namespace SnapTransOCR
                     if (imagePath != null) File.Delete(imagePath);
                     throw;
                 }
-                CleanupImages(entries.ToArray());
+                CleanupImages(entries);
                 return true;
             });
         }
@@ -128,41 +130,54 @@ namespace SnapTransOCR
         }
         internal Task<Bitmap> LoadImageAsync(string id)
         {
-            return Execute(delegate
-            {
-                HistoryEntry entry = Array.Find(Read(), item => item.Id == id);
-                string path = entry == null ? null : ImagePath(entry);
-                if (path == null || !File.Exists(path)) return null;
-                using (var stream = File.OpenRead(path))
-                using (var loaded = Image.FromStream(stream)) return new Bitmap(loaded);
-            });
+            return ReadImageAsync(id, loaded => new Bitmap(loaded), CancellationToken.None);
         }
         internal Task<Bitmap> LoadThumbnailAsync(string id, Size maximum, CancellationToken cancellation)
         {
-            return Execute(delegate
+            return ReadImageAsync(id, loaded =>
             {
-                cancellation.ThrowIfCancellationRequested();
-                HistoryEntry entry = Array.Find(Read(), item => item.Id == id);
-                string path = entry == null ? null : ImagePath(entry);
-                if (path == null || !File.Exists(path)) return null;
-                using (var stream = File.OpenRead(path))
-                using (var loaded = Image.FromStream(stream))
+                double scale = Math.Min(1, Math.Min(maximum.Width / (double)loaded.Width, maximum.Height / (double)loaded.Height));
+                var thumbnail = new Bitmap(Math.Max(1, (int)Math.Round(loaded.Width * scale)), Math.Max(1, (int)Math.Round(loaded.Height * scale)), PixelFormat.Format32bppPArgb);
+                try
                 {
-                    double scale = Math.Min(1, Math.Min(maximum.Width / (double)loaded.Width, maximum.Height / (double)loaded.Height));
-                    var thumbnail = new Bitmap(Math.Max(1, (int)Math.Round(loaded.Width * scale)), Math.Max(1, (int)Math.Round(loaded.Height * scale)), PixelFormat.Format32bppPArgb);
-                    try
+                    using (var graphics = Graphics.FromImage(thumbnail))
                     {
-                        using (var graphics = Graphics.FromImage(thumbnail))
-                        {
-                            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                            graphics.DrawImage(loaded, new Rectangle(Point.Empty, thumbnail.Size));
-                        }
-                        cancellation.ThrowIfCancellationRequested();
-                        return thumbnail;
+                        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        graphics.DrawImage(loaded, new Rectangle(Point.Empty, thumbnail.Size));
                     }
-                    catch { thumbnail.Dispose(); throw; }
+                    return thumbnail;
                 }
+                catch { thumbnail.Dispose(); throw; }
             }, cancellation);
+        }
+        private async Task<Bitmap> ReadImageAsync(string id, Func<Image, Bitmap> decode, CancellationToken cancellation)
+        {
+            // Serialize bitmap decoding separately so large previews do not hold the history index lock.
+            await imageGate.WaitAsync(cancellation).ConfigureAwait(false);
+            try
+            {
+                using (var stream = await Execute(delegate
+                {
+                    HistoryEntry entry = Array.Find(Read(), item => item.Id == id);
+                    string path = entry == null ? null : ImagePath(entry);
+                    return path == null || !File.Exists(path) ? null : new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+                }, cancellation).ConfigureAwait(false))
+                {
+                    if (stream == null) return null;
+                    return await Task.Run(delegate
+                    {
+                        cancellation.ThrowIfCancellationRequested();
+                        using (var loaded = Image.FromStream(stream))
+                        {
+                            cancellation.ThrowIfCancellationRequested();
+                            Bitmap image = decode(loaded);
+                            try { cancellation.ThrowIfCancellationRequested(); return image; }
+                            catch { image.Dispose(); throw; }
+                        }
+                    }, cancellation).ConfigureAwait(false);
+                }
+            }
+            finally { imageGate.Release(); }
         }
         private async Task<T> Execute<T>(Func<T> operation, CancellationToken cancellation = default(CancellationToken), bool initialize = true)
         {
@@ -228,24 +243,61 @@ namespace SnapTransOCR
             if (entries.Length != previous.Length) { Write(entries); changed = true; CleanupImages(entries); }
             return entries;
         }
-        private static HistoryEntry[] ReadFile(string path)
+        private HistoryEntry[] ReadFile(string path)
         {
-            if (!File.Exists(path)) return new HistoryEntry[0];
-            if (new FileInfo(path).Length > MaxTextBytes) throw new InvalidOperationException("历史记录文件超过文字容量限制。请清空历史记录后重试。");
-            string text = File.ReadAllText(path, Encoding.UTF8);
-            try { return (Json.Read<HistoryEntry[]>(text) ?? new HistoryEntry[0]).Where(item => item != null).ToArray(); }
-            catch (ArgumentException) { throw new InvalidOperationException("历史记录文件无法读取。可清空历史记录后重新使用。"); }
-            catch (InvalidOperationException) { throw new InvalidOperationException("历史记录文件无法读取。可清空历史记录后重新使用。"); }
+            if (!File.Exists(path))
+            {
+                cachedHash = null;
+                cachedEntries = null;
+                return new HistoryEntry[0];
+            }
+            using (var stream = File.OpenRead(path))
+            {
+                if (stream.Length > MaxTextBytes) throw new InvalidOperationException("历史记录文件超过文字容量限制。请清空历史记录后重试。");
+                byte[] hash = null;
+                if (stream.Length <= MaxCachedIndexBytes)
+                {
+                    using (var sha = SHA256.Create()) hash = sha.ComputeHash(stream);
+                    if (cachedHash != null && hash.SequenceEqual(cachedHash)) return Array.ConvertAll(cachedEntries, item => item.Copy());
+                    stream.Position = 0;
+                }
+                string text;
+                using (var reader = new StreamReader(stream, Encoding.UTF8)) text = reader.ReadToEnd();
+                HistoryEntry[] entries;
+                try { entries = (Json.Read<HistoryEntry[]>(text) ?? new HistoryEntry[0]).Where(item => item != null).ToArray(); }
+                catch (ArgumentException) { throw new InvalidOperationException("历史记录文件无法读取。可清空历史记录后重新使用。"); }
+                catch (InvalidOperationException) { throw new InvalidOperationException("历史记录文件无法读取。可清空历史记录后重新使用。"); }
+                cachedHash = hash;
+                cachedEntries = hash == null ? null : Array.ConvertAll(entries, item => item.Copy());
+                return entries;
+            }
         }
-        private void Write(HistoryEntry[] entries)
+        private void Write(HistoryEntry[] entries, string serialized = null)
         {
             Directory.CreateDirectory(directory);
             string temporary = Path.Combine(directory, "history-" + Guid.NewGuid().ToString("N") + ".tmp");
             try
             {
-                byte[] bytes = Encoding.UTF8.GetBytes(Json.Write(entries));
+                byte[] bytes = Encoding.UTF8.GetBytes(serialized ?? Json.Write(entries));
+                byte[] hash = null;
+                HistoryEntry[] snapshot = null;
+                if (bytes.Length <= MaxCachedIndexBytes)
+                {
+                    using (var sha = SHA256.Create()) hash = sha.ComputeHash(bytes);
+                    long epochTicks = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;
+                    snapshot = Array.ConvertAll(entries, item =>
+                    {
+                        var copy = item.Copy();
+                        // JavaScriptSerializer stores UTC dates as Unix milliseconds.
+                        long milliseconds = (copy.CreatedUtc.ToUniversalTime().Ticks - epochTicks) / TimeSpan.TicksPerMillisecond;
+                        copy.CreatedUtc = new DateTime(epochTicks + milliseconds * TimeSpan.TicksPerMillisecond, DateTimeKind.Utc);
+                        return copy;
+                    });
+                }
                 using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { stream.Write(bytes, 0, bytes.Length); stream.Flush(true); }
                 if (File.Exists(indexPath)) File.Replace(temporary, indexPath, null); else File.Move(temporary, indexPath);
+                cachedHash = hash;
+                cachedEntries = snapshot;
             }
             finally { File.Delete(temporary); }
         }

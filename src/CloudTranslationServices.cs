@@ -73,6 +73,8 @@ namespace SnapTransOCR
                 payload.Add("messages", new[] {
                     new Dictionary<string, object> { { "role", "system" }, { "content", instruction } },
                     new Dictionary<string, object> { { "role", "user" }, { "content", text } } });
+                var model = TranslationModels.Find(settings.ArkModel);
+                if (model != null && model.DisableThinking) payload.Add("thinking", new Dictionary<string, object> { { "type", "disabled" } });
             }
             using (var request = new HttpRequestMessage(HttpMethod.Post, "https://ark.cn-beijing.volces.com/api/v3/" + (seed ? "responses" : "chat/completions")))
             {
@@ -190,9 +192,11 @@ namespace SnapTransOCR
                 var lines = new List<string>();
                 foreach (object item in items)
                 {
-                    string value = Json.Get(Json.Map(item), "dst") as string;
-                    if (String.IsNullOrWhiteSpace(value)) throw new InvalidOperationException("百度翻译返回了空结果。");
-                    lines.Add(value);
+                    var row = Json.Map(item);
+                    string value = Json.Get(row, "dst") as string, original = Json.Get(row, "src") as string;
+                    bool blank = original != null && String.IsNullOrWhiteSpace(original);
+                    if (value == null || (String.IsNullOrWhiteSpace(value) && !blank)) throw new InvalidOperationException("百度翻译返回了空结果。");
+                    lines.Add(blank && String.IsNullOrWhiteSpace(value) ? "" : value);
                 }
                 return String.Join(Environment.NewLine, lines);
             }

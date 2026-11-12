@@ -61,7 +61,7 @@ namespace SnapTransOCR
                     var model = Field<ComboBox>(form, "arkModel");
                     string presetId = "doubao-seed-2-1-lite-260915";
                     check(model.DropDownStyle == ComboBoxStyle.DropDownList && model.Items.Count == TranslationModels.Ark.Length + 1, "the styled model list offers all known presets and one separate custom ID option");
-                    check(model.Items.Cast<object>().Count(item => item.ToString().Contains("即将下线")) == 5, "retiring models stay visibly labeled in the picker without requiring a tooltip");
+                    check(model.Items.Cast<object>().Count(item => item.ToString().Contains("即将下线")) == 3 && model.Items.Cast<object>().Count(item => item.ToString().Contains("已下线")) == 2, "retired and retiring model versions stay visibly distinguished in the picker");
                     model.SelectedIndex = Array.IndexOf((string[])model.Tag, presetId); Save(form);
                     check(saved.ArkModel == presetId && model.Text == "豆包 Seed 2.1 Lite" && model.AccessibleDescription == presetId && !fields["ArkModel"].Parent.Visible, "a concise model selection saves its API ID while hiding the custom ID row");
                     model.SelectedIndex = TranslationModels.Ark.Length; fields["ArkModel"].Text = "ep-custom-endpoint"; Save(form);

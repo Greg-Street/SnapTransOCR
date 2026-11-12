@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace SnapTransOCR
@@ -130,11 +131,21 @@ namespace SnapTransOCR
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
                 try
                 {
-                    using (var stream = new FileStream(dialog.FileName, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
-                        await stream.WriteAsync(data, 0, data.Length);
+                    await SaveWorkbookAsync(dialog.FileName, data);
                 }
                 catch (Exception ex) { if (!IsDisposed) Ui.Error(this, ex); }
             }
+        }
+        internal static async Task SaveWorkbookAsync(string destination, byte[] data)
+        {
+            string temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 8192, true))
+                    await stream.WriteAsync(data, 0, data.Length).ConfigureAwait(false);
+                if (File.Exists(destination)) File.Replace(temporary, destination, null); else File.Move(temporary, destination);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
         public void SetStatus(string value) { status.Text = value; LayoutContent(); }
         public void Busy(bool value)

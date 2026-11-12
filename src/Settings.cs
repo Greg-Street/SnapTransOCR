@@ -25,6 +25,7 @@ namespace SnapTransOCR
         public bool ArkEnabled { get; set; }
         public string ArkApiKey { get; set; }
         public string ArkModel { get; set; }
+        public string[] ArkExtraModels { get; set; }
         public string ArkApiMode { get; set; }
         public bool BaiduLlmEnabled { get; set; }
         public string BaiduLlmApiKey { get; set; }
@@ -50,10 +51,14 @@ namespace SnapTransOCR
         public bool ScreenshotCopyOnConfirm { get; set; }
         public bool PinTopmost { get; set; }
         public bool CaptureMagnifier { get; set; }
+        public bool CaptureCursor { get; set; }
+        public bool CaptureShortcutHints { get; set; }
+        public int CaptureBorderWidth { get; set; }
         public int CaptureStroke { get; set; }
         public int CaptureColorArgb { get; set; }
         public int CaptureTextSize { get; set; }
         public bool CaptureTextBold { get; set; }
+        public string GifQuality { get; set; }
         public bool StartWithWindows { get; set; }
         public bool HistoryEnabled { get; set; }
         public int HistoryRetentionDays { get; set; }
@@ -88,9 +93,12 @@ namespace SnapTransOCR
             ScreenshotCopyOnConfirm = true;
             PinTopmost = true;
             CaptureMagnifier = true;
+            CaptureShortcutHints = true;
+            CaptureBorderWidth = 2;
             CaptureStroke = 2;
             CaptureColorArgb = unchecked((int)0xffef4a40);
             CaptureTextSize = 24;
+            GifQuality = "compact";
             HistoryEnabled = true;
             HistoryRetentionDays = 7;
             HistoryShortcutVersion = 2;
@@ -103,7 +111,38 @@ namespace SnapTransOCR
             copy.Hotkeys = Hotkeys == null ? null : (string[])Hotkeys.Clone();
             copy.TranslateServiceOrder = TranslateServiceOrder == null ? null : (string[])TranslateServiceOrder.Clone();
             copy.OcrServiceOrder = OcrServiceOrder == null ? null : (string[])OcrServiceOrder.Clone();
+            copy.ArkExtraModels = ArkExtraModels == null ? null : (string[])ArkExtraModels.Clone();
             return copy;
+        }
+
+        internal string[] ExtraArkModels()
+        {
+            var result = new List<string>();
+            foreach (string item in ArkExtraModels ?? new string[0])
+            {
+                string model = (item ?? "").Trim();
+                if (model.Length > 0 && model != ArkModel && !result.Contains(model)) result.Add(model);
+            }
+            return result.ToArray();
+        }
+        internal string[] TranslationRequests()
+        {
+            var result = new List<string> { TranslateProvider };
+            if (TranslateProvider == "ark" && ArkEnabled)
+                foreach (string model in ExtraArkModels()) result.Add("ark:" + model);
+            return result.ToArray();
+        }
+        internal AppSettings ForTranslation(string provider)
+        {
+            var result = Copy();
+            if ((provider ?? "").StartsWith("ark:", StringComparison.Ordinal))
+            {
+                string model = provider.Substring(4);
+                if (!ArkEnabled || Array.IndexOf(ExtraArkModels(), model) < 0) throw new InvalidOperationException("该方舟模型未启用，请检查翻译设置。");
+                result.TranslateProvider = "ark"; result.ArkModel = model; result.ArkApiMode = "auto";
+            }
+            else result.TranslateProvider = provider;
+            return result;
         }
 
         internal void PreserveLiveLanguages(AppSettings original, AppSettings current)
@@ -291,6 +330,7 @@ namespace SnapTransOCR
                 }
                 settings.HistoryShortcutVersion = 2;
                 if (settings.HistoryRetentionDays < 1 || settings.HistoryRetentionDays > 3650) settings.HistoryRetentionDays = 7;
+                if (settings.CaptureBorderWidth < 1 || settings.CaptureBorderWidth > 12) settings.CaptureBorderWidth = 2;
                 settings.NormalizeProviders();
                 return settings;
             }

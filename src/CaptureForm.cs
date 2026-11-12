@@ -39,28 +39,11 @@ namespace SnapTransOCR
                 top = bottom;
             }
         }
-        public static Bitmap Desktop(Rectangle bounds)
-        {
-            var bitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppRgb);
-            try
-            {
-                using (Graphics graphics = Graphics.FromImage(bitmap))
-                {
-                    IntPtr source = Native.GetDC(IntPtr.Zero);
-                    if (source == IntPtr.Zero) throw new InvalidOperationException("无法读取当前桌面，请确认屏幕已解锁。");
-                    IntPtr destination = graphics.GetHdc();
-                    try
-                    {
-                        if (!Native.BitBlt(destination, 0, 0, bounds.Width, bounds.Height, source, bounds.X, bounds.Y, 0x40cc0020))
-                            throw new InvalidOperationException("截图失败，请确认屏幕已解锁且当前画面允许捕获。");
-                    }
-                    finally { graphics.ReleaseHdc(destination); Native.ReleaseDC(IntPtr.Zero, source); }
-                }
-                return bitmap;
-            }
-            catch { bitmap.Dispose(); throw; }
-        }
-        internal static Bitmap FrozenDesktop(Rectangle bounds)
+        public static Bitmap Desktop(Rectangle bounds, bool includeCursor = false)
+        { return CaptureDesktop(bounds, includeCursor, PixelFormat.Format32bppRgb); }
+        internal static Bitmap FrozenDesktop(Rectangle bounds, bool includeCursor = false)
+        { return CaptureDesktop(bounds, includeCursor, PixelFormat.Format32bppPArgb); }
+        private static Bitmap CaptureDesktop(Rectangle bounds, bool includeCursor, PixelFormat format)
         {
             // Capture into a top-down DIB to avoid GetHdc/ReleaseHdc's extra full-screen bitmap copy.
             IntPtr screen = Native.GetDC(IntPtr.Zero), target = IntPtr.Zero, bitmap = IntPtr.Zero, previous = IntPtr.Zero;
@@ -77,9 +60,20 @@ namespace SnapTransOCR
                 if (previous == IntPtr.Zero || previous == new IntPtr(-1)) throw new InvalidOperationException("无法准备截图画布。");
                 if (!Native.BitBlt(target, 0, 0, bounds.Width, bounds.Height, screen, bounds.X, bounds.Y, 0x40cc0020))
                     throw new InvalidOperationException("截图失败，请确认屏幕已解锁且当前画面允许捕获。");
+                if (includeCursor) CaptureSessionUi.DrawCursor(target, bounds);
                 Native.GdiFlush();
                 // Treat undefined GDI alpha as opaque, then make an independently owned display bitmap.
-                using (var source = new Bitmap(bounds.Width, bounds.Height, bounds.Width * 4, PixelFormat.Format32bppRgb, bits)) return ForDisplay(source);
+                using (var source = new Bitmap(bounds.Width, bounds.Height, bounds.Width * 4, PixelFormat.Format32bppRgb, bits))
+                {
+                    if (format == PixelFormat.Format32bppPArgb) return ForDisplay(source);
+                    var result = new Bitmap(bounds.Width, bounds.Height, format);
+                    try
+                    {
+                        using (var graphics = Graphics.FromImage(result)) graphics.DrawImageUnscaled(source, 0, 0);
+                        return result;
+                    }
+                    catch { result.Dispose(); throw; }
+                }
             }
             finally
             {

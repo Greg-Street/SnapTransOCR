@@ -251,8 +251,14 @@ namespace SnapTransOCR
         {
             HistoryEntry[] loaded = await store.LoadAsync();
             if (IsDisposed) return;
+            HistoryEntry top = list.TopIndex > 0 && list.TopIndex < list.Items.Count ? (HistoryEntry)list.Items[list.TopIndex] : null;
             entries = loaded;
             ApplyFilter();
+            int topIndex = 0;
+            if (top != null)
+                for (int index = 0; index < list.Items.Count; index++)
+                    if (((HistoryEntry)list.Items[index]).Id == top.Id) { topIndex = index; break; }
+            if (list.Items.Count > 0) list.TopIndex = topIndex;
         }
         private void ApplyFilter()
         {
@@ -386,6 +392,8 @@ namespace SnapTransOCR
             translationPanel.Visible = !capture && !ocr && !clipboardText;
             previewPanel.Visible = entry != null && !String.IsNullOrEmpty(entry.ImageFile);
             string sourceText = entry == null ? "" : entry.Source ?? "", translatedText = entry == null ? "" : entry.Translation ?? "";
+            translationTitle.Text = entry != null && (entry.TranslateProvider ?? "").StartsWith("ark:", StringComparison.Ordinal)
+                ? "译文 · " + TranslationModels.Caption(entry.TranslateProvider.Substring(4)) : "译文";
             if (source.Text != sourceText) source.Text = sourceText;
             if (translation.Text != translatedText) translation.Text = translatedText;
             copySource.Enabled = source.TextLength > 0; copyTranslation.Enabled = translation.TextLength > 0;
@@ -399,8 +407,7 @@ namespace SnapTransOCR
         }
         private void SetBusy(bool value)
         {
-            busy = value; list.Enabled = clear.Enabled = search.Enabled = !value;
-            foreach (var button in filterButtons) button.Enabled = !value;
+            busy = value; clear.Enabled = !value;
             copySelected.Enabled = !value && Selected != null;
             remove.Enabled = !value && Selected != null;
             openImage.Enabled = !value && Selected != null;
@@ -497,7 +504,8 @@ namespace SnapTransOCR
             previewTitle.Location = new Point(S(14), capture ? S(10) : Math.Max(S(10), (previewHeight - previewTitle.Height) / 2));
             preview.SetBounds(capture ? S(10) : S(100), capture ? S(36) : S(10), Math.Max(1, previewPanel.Width - (capture ? S(20) : S(110))), Math.Max(1, previewPanel.Height - (capture ? S(46) : S(20))));
             captureSummary.Bounds = preview.Bounds;
-            translationTitle.Location = new Point(S(14), S(10)); copyTranslation.SetBounds(details - S(44), S(4), S(32), S(32));
+            translationTitle.AutoSize = false; translationTitle.AutoEllipsis = true;
+            translationTitle.SetBounds(S(14), S(10), Math.Max(1, details - S(64)), translationTitle.Font.Height + S(4)); copyTranslation.SetBounds(details - S(44), S(4), S(32), S(32));
             translation.SetBounds(S(14), S(42), details - S(28), Math.Max(1, translationPanel.Height - S(56)));
             remove.SetBounds(details - S(80), 0, S(80), S(34));
             copySelected.SetBounds(remove.Left - S(120), 0, S(112), S(34));

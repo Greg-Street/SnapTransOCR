@@ -44,7 +44,7 @@ namespace SnapTransOCR
         internal const long MaxImagePixels = 50000000;
         internal string Text;
         internal Bitmap Image;
-        internal static ClipboardContent Read(IDataObject data)
+        internal static ClipboardContent Read(IDataObject data, bool ownsImage = false)
         {
             if (data == null || data.GetDataPresent("ExcludeClipboardContentFromMonitorProcessing", false)) return null;
             if (data.GetDataPresent("CanIncludeInClipboardHistory", false))
@@ -58,14 +58,18 @@ namespace SnapTransOCR
             if (data.GetDataPresent(DataFormats.Bitmap, true))
             {
                 var image = data.GetData(DataFormats.Bitmap, true) as Image;
-                if (image == null || (long)image.Width * image.Height > MaxImagePixels) return null;
-                var copy = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppPArgb);
                 try
                 {
-                    using (var graphics = Graphics.FromImage(copy)) { graphics.CompositingMode = CompositingMode.SourceCopy; graphics.DrawImageUnscaled(image, 0, 0); }
-                    return new ClipboardContent { Image = copy };
+                    if (image == null || (long)image.Width * image.Height > MaxImagePixels) return null;
+                    var copy = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppPArgb);
+                    try
+                    {
+                        using (var graphics = Graphics.FromImage(copy)) { graphics.CompositingMode = CompositingMode.SourceCopy; graphics.DrawImageUnscaled(image, 0, 0); }
+                        return new ClipboardContent { Image = copy };
+                    }
+                    catch { copy.Dispose(); throw; }
                 }
-                catch { copy.Dispose(); throw; }
+                finally { if (ownsImage && image != null) image.Dispose(); }
             }
             string text = data.GetData(DataFormats.UnicodeText, true) as string;
             if (String.IsNullOrWhiteSpace(text) || Encoding.UTF8.GetByteCount(text) > MaxTextBytes) return null;
@@ -109,7 +113,7 @@ namespace SnapTransOCR
         private readonly HashSet<Task> writes = new HashSet<Task>();
         private Task writing = Task.CompletedTask;
         private bool disposed, pending;
-        private uint pendingSequence;
+        private uint pendingSequence, observedSequence;
         private int attempts;
 
         internal ClipboardHistory(HistoryStore history, Func<bool> enabled, Action<Exception> onError = null)
@@ -119,6 +123,7 @@ namespace SnapTransOCR
             timer = new System.Windows.Forms.Timer { Interval = 150 };
             timer.Tick += delegate { timer.Stop(); CapturePending(false); };
             CreateHandle(new CreateParams { Caption = "SnapTransOCR.ClipboardHistory", Parent = new IntPtr(-3) });
+            observedSequence = Native.GetClipboardSequenceNumber();
             if (!AddClipboardFormatListener(Handle)) { timer.Dispose(); DestroyHandle(); throw new InvalidOperationException("无法监听系统剪贴板变化。"); }
             ClipboardRecording.Released += SuppressionReleased;
         }
@@ -133,11 +138,12 @@ namespace SnapTransOCR
             if (disposed) return;
             timer.Stop();
             uint sequence = Native.GetClipboardSequenceNumber();
+            observedSequence = sequence;
             if (!enabled() || ClipboardRecording.IsIgnored(sequence)) { pending = false; return; }
             pending = true; pendingSequence = sequence; attempts = 0; timer.Interval = 150;
             if (!ClipboardRecording.Suppressed) timer.Start();
         }
-        internal void ResetEnabledState() { pending = false; timer.Stop(); }
+        internal void ResetEnabledState() { pending = false; observedSequence = Native.GetClipboardSequenceNumber(); timer.Stop(); }
         private void CapturePending(bool final)
         {
             if (disposed || !pending || !enabled()) { pending = false; return; }
@@ -150,7 +156,7 @@ namespace SnapTransOCR
             try
             {
                 if (Native.GetOpenClipboardWindow() != IntPtr.Zero) throw new ExternalException();
-                content = ClipboardContent.Read(Clipboard.GetDataObject());
+                content = ClipboardContent.Read(Clipboard.GetDataObject(), ownsImage: true);
                 if (Native.GetOpenClipboardWindow() != IntPtr.Zero) throw new ExternalException();
                 if (Native.GetClipboardSequenceNumber() != sequence) { if (content != null) content.Dispose(); Schedule(); return; }
                 pending = false; timer.Interval = 150;
@@ -189,7 +195,10 @@ namespace SnapTransOCR
         public void Dispose()
         {
             if (disposed) return;
-            timer.Stop(); CapturePending(true); disposed = true;
+            timer.Stop();
+            // The final WM_CLIPBOARDUPDATE may still be queued when the application exits.
+            if (Native.GetClipboardSequenceNumber() != observedSequence) { Schedule(); timer.Stop(); }
+            CapturePending(true); disposed = true;
             ClipboardRecording.Released -= SuppressionReleased;
             RemoveClipboardFormatListener(Handle); DestroyHandle(); timer.Dispose();
         }

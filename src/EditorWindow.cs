@@ -59,9 +59,11 @@ namespace SnapTransOCR
         internal void RefreshSettings(AppSettings settings) { RecognitionMenu.Update(recognition, settings); }
         internal void EnableHistoryNavigation(Action returnToHistory)
         {
+            MinimumSize = new Size(Ui.Scale(this, 360), Ui.Scale(this, 220));
+            Control neighbor = bar.Controls[0];
             GlyphButton back = Add(bar, "history", "返回历史记录", delegate { Close(); returnToHistory(); });
-            back.Size = new Size(Ui.Scale(this, 44), Ui.Scale(this, 44));
-            back.Margin = new Padding(Ui.Scale(this, 1));
+            back.Size = neighbor.Size;
+            back.Margin = neighbor.Margin;
             bar.Controls.SetChildIndex(back, 0);
         }
         internal Size PreferredImageSize(Size available)

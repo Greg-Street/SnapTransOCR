@@ -69,11 +69,11 @@ namespace SnapTransOCR
         private readonly Dictionary<string, string> cache = new Dictionary<string, string>();
         private readonly Queue<string> cacheOrder = new Queue<string>();
 
-        public CloudApi() : this(new HttpClientHandler { AllowAutoRedirect = false, AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate }) { }
+        public CloudApi() : this(new HttpClientHandler { AllowAutoRedirect = false, MaxConnectionsPerServer = 8, AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate }) { }
         internal CloudApi(HttpMessageHandler handler)
         {
             client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan, MaxResponseContentBufferSize = 24 * 1024 * 1024 };
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("SnapTransOCR/0.2.21");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SnapTransOCR/0.2.29");
             bing = new BingTranslator(client);
         }
 

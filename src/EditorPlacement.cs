@@ -21,30 +21,18 @@ namespace SnapTransOCR
                 Size size = editor.PreferredImageSize(work.Size);
                 editor.Bounds = new Rectangle(work.Left + (work.Width - size.Width) / 2, work.Top + (work.Height - size.Height) / 2, size.Width, size.Height);
             }
-            else editor.Bounds = Calculate(work, settings.Bounds, editor.MinimumSize, Ui.Scale(editor, 12), editor.PreferredImageSize);
+            else
+            {
+                editor.Bounds = Calculate(work, settings.Bounds, Ui.Scale(editor, 24), editor.PreferredImageSize);
+                editor.TopMost = settings.TopMost;
+            }
         }
 
-        internal static Rectangle Calculate(Rectangle work, Rectangle settings, Size minimum, int gap, Func<Size, Size> fit)
+        internal static Rectangle Calculate(Rectangle work, Rectangle settings, int gap, Func<Size, Size> fit)
         {
-            int minWidth = Math.Min(minimum.Width, work.Width), minHeight = Math.Min(minimum.Height, work.Height);
-            // Use free space first; retain the user's settings window position and size.
-            var spaces = new[]
-            {
-                Rectangle.FromLTRB(Math.Min(work.Right, Math.Max(work.Left, settings.Right + gap)), work.Top, work.Right, work.Bottom),
-                Rectangle.FromLTRB(work.Left, work.Top, Math.Max(work.Left, Math.Min(work.Right, settings.Left - gap)), work.Bottom),
-                Rectangle.FromLTRB(work.Left, Math.Min(work.Bottom, Math.Max(work.Top, settings.Bottom + gap)), work.Right, work.Bottom),
-                Rectangle.FromLTRB(work.Left, work.Top, work.Right, Math.Max(work.Top, Math.Min(work.Bottom, settings.Top - gap)))
-            };
-            foreach (Rectangle space in spaces)
-            {
-                if (space.Width < minWidth || space.Height < minHeight) continue;
-                Size size = fit(space.Size);
-                return new Rectangle(Clamp(settings.Left, space.Left, space.Right - size.Width), Clamp(settings.Top, space.Top, space.Bottom - size.Height), size.Width, size.Height);
-            }
-            // Keep the left half of settings accessible whenever the monitor can fit the minimum editor width.
-            int availableWidth = Math.Min(work.Width, Math.Max(minWidth, work.Right - settings.Left - settings.Width / 2));
-            Size fallback = fit(new Size(availableWidth, work.Height));
-            return new Rectangle(work.Right - fallback.Width, Clamp(settings.Top + gap, work.Top, work.Bottom - fallback.Height), fallback.Width, fallback.Height);
+            Size size = fit(work.Size);
+            return new Rectangle(Clamp(settings.Left + gap, work.Left, work.Right - size.Width),
+                Clamp(settings.Top + gap, work.Top, work.Bottom - size.Height), size.Width, size.Height);
         }
 
         internal static Size FitImage(Size image, Size available, Size minimum, Size chrome)

@@ -54,7 +54,7 @@ try {
     [IO.File]::WriteAllText($noticePath, [IO.File]::ReadAllText($noticePath).Replace('docs/LICENSE-Apache-2.0.txt', 'LICENSE-Apache-2.0.txt'), [Text.UTF8Encoding]::new($false))
     $sourceUsage = Join-Path $sourcePath '使用说明.txt'
     if (Test-Path -LiteralPath $sourceUsage -PathType Leaf) { Copy-Item -LiteralPath $sourceUsage -Destination $stagePayload }
-    else { Set-Content -LiteralPath (Join-Path $stagePayload '使用说明.txt') -Encoding utf8 -Value 'SnapTransOCR：Alt+1 截图，Ctrl+Shift+A 划词翻译，Ctrl+Alt+V 历史/剪贴板。右键托盘打开设置。历史优先保存在 data\history，API 配置保存在 %LOCALAPPDATA%\SnapTransOCR\settings.json。' }
+    else { Set-Content -LiteralPath (Join-Path $stagePayload '使用说明.txt') -Encoding utf8 -Value 'SnapTransOCR：Alt+1 截图，Ctrl+Shift+A 划词翻译，Ctrl+Shift+S 历史/剪贴板。右键托盘打开设置。历史优先保存在 data\history，API 配置保存在 %LOCALAPPDATA%\SnapTransOCR\settings.json。' }
     if ($copyData) {
         Copy-Item -LiteralPath $sourceData -Destination $stagePayload -Recurse
         $stagedData = Join-Path $stagePayload 'data'

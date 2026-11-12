@@ -64,7 +64,23 @@ namespace SnapTransOCR
                 if (args.Contains("--live-tencent-table")) { LiveTencentTableChecks.Run(Output).GetAwaiter().GetResult(); return 0; }
                 if (args.Contains("--live-baidu")) { LiveBaiduChecks.Run(Output).GetAwaiter().GetResult(); return 0; }
                 if (args.Contains("--cloud-services-only")) { TranslationModelTests.Run(Check); ExtendedTranslationTests.Run(Check).GetAwaiter().GetResult(); SpecialRecognitionTests.Run(Check).GetAwaiter().GetResult(); ExtendedServiceSettingsTests.Run(Check); ConsolidatedTranslationSettingsTests.Run(Check); ExtendedRecognitionFlowTests.Run(Check); SpecialUiLifecycleTests.Run(Check); Console.WriteLine("PASS: " + assertions + " assertions"); return 0; }
+                if (args.Contains("--translation-services-only")) { TranslationModelTests.Run(Check); ExtendedTranslationTests.Run(Check).GetAwaiter().GetResult(); ArkParallelTests.Run(Check); Console.WriteLine("PASS: " + assertions + " translation assertions"); return 0; }
+                if (args.Contains("--gif-only")) { GifStreamTests.Run(Check); Console.WriteLine("PASS: " + assertions + " GIF assertions"); return 0; }
+                if (args.Contains("--capture-tools-only")) { GifStreamTests.Run(Check); GifQualityTests.Run(Check); EditorPlacementTests.Run(Check); ScrollingOptimizationTests.Run(Check); ScrollCaptureWorkTests.Run(Check); CaptureToolsTests.Run(Check); Console.WriteLine("PASS: " + assertions + " capture tools assertions"); return 0; }
+                if (args.Contains("--gif-native-only")) { CaptureToolsTests.RunNative(Check); Console.WriteLine("PASS: " + assertions + " native GIF assertions"); return 0; }
+                if (args.Contains("--capture-refinement-only")) { CaptureRefinementTests.Run(Check, Output); Console.WriteLine("PASS: " + assertions + " capture refinement assertions"); return 0; }
+                if (args.Contains("--scroll-directions-only")) { ScrollDirectionTests.Run(Check); Console.WriteLine("PASS: " + assertions + " bidirectional scrolling assertions"); return 0; }
+                if (args.Contains("--capture-interaction-only")) { CaptureInteractionTests.Run(Check, Output); Console.WriteLine("PASS: " + assertions + " capture interaction assertions"); return 0; }
+                if (args.Contains("--capture-refinement-native")) { CaptureRefinementTests.RunNative(Check, Output); CapturePerformanceTests.RunNative(Check); Console.WriteLine("PASS: " + assertions + " native capture refinement assertions"); return 0; }
+                if (args.Contains("--settings-layout-only")) { SettingsLayoutTests.Run(Check); Console.WriteLine("PASS: " + assertions + " settings layout assertions"); return 0; }
+                if (args.Contains("--settings-controls-only")) { DropdownTests.Run(Check); PasswordFieldTests.Run(Check); HistoryRetentionSettingsTests.Run(Check); Console.WriteLine("PASS: " + assertions + " settings control assertions"); return 0; }
+                if (args.Contains("--window-regression-only")) { WindowSizeTests.Run(Check); WindowMotionTests.Run(Check); ResultScrollingTests.Run(Check); Console.WriteLine("PASS: " + assertions + " window regression assertions"); return 0; }
+                if (args.Contains("--screenshot-regression-only")) { CaptureDpiTests.Run(Check); CapturePerformanceTests.Run(Check); AnnotationStyleTests.Run(Check); ImageCanvasCaptureTests.Run(Check); MosaicRenderTests.Run(Check); Console.WriteLine("PASS: " + assertions + " screenshot regression assertions"); return 0; }
+                if (args.Contains("--optimization-only")) { OptimizationTests.Run(Check); Console.WriteLine("PASS: " + assertions + " optimization assertions"); return 0; }
+                if (args.Contains("--architecture-only")) { HistorySnapshotTests.Run(Check).GetAwaiter().GetResult(); CloudApiTests.Run(Check).GetAwaiter().GetResult(); EfficiencyTests.Run(Check); Console.WriteLine("PASS: " + assertions + " architecture assertions"); return 0; }
                 if (args.Contains("--pin-text-only")) { PinTextTests.Run(Check); Console.WriteLine("PASS: " + assertions + " assertions"); return 0; }
+                if (args.Contains("--pinned-window-only")) { PinnedWindowTests.Run(Check); Console.WriteLine("PASS: " + assertions + " pinned window assertions"); return 0; }
+                if (args.Contains("--image-work-only")) { ImageWorkCancellationTests.Run(Check); Console.WriteLine("PASS: " + assertions + " image work assertions"); return 0; }
                 if (args.Contains("--presentation-only")) { PresentationTests.Run(Check, Output); return 0; }
                 if (args.Contains("--render-only")) { RenderReferences(); Console.WriteLine("Rendered three reference layouts without opening desktop windows."); return 0; }
                 if (args.Contains("--history-window-only")) { HistoryStandaloneTests.Run(Check); Console.WriteLine("PASS: " + assertions + " standalone history assertions"); return 0; }
@@ -140,6 +156,8 @@ namespace SnapTransOCR
                 MainScrollWorkTests.Run(Check);
                 WindowGeometryTests.Run(Check);
                 SettingsLayoutTests.Run(Check);
+                CaptureRefinementTests.Run(Check, Output);
+                CaptureInteractionTests.Run(Check, Output);
                 SettingsScrollTests.Run(Check);
                 SettingsSaveTests.Run(Check);
                 TraySettingsTests.Run(Check);
@@ -155,6 +173,7 @@ namespace SnapTransOCR
                 BingUiTests.Run(Check);
                 ServiceDragPaintTests.Run(Check);
                 EfficiencyTests.Run(Check);
+                OptimizationTests.Run(Check);
                 PinnedWindowTests.Run(Check);
                 PinRotationTests.Run(Check);
                 PinTextTests.Run(Check);
@@ -168,6 +187,7 @@ namespace SnapTransOCR
                 WindowRegionResizeTests.Run(Check);
                 Images();
                 ScrollingOptimizationTests.Run(Check);
+                ScrollDirectionTests.Run(Check);
                 ScrollCaptureWorkTests.Run(Check);
                 Annotation();
                 MosaicRenderTests.Run(Check);

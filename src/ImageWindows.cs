@@ -161,6 +161,11 @@ namespace SnapTransOCR
             if (!toolbar.Visible) toolbar.Show(this);
         }
         protected override void OnLocationChanged(EventArgs e) { base.OnLocationChanged(e); LayoutToolbar(); }
+        protected override void SetVisibleCore(bool value)
+        {
+            base.SetVisibleCore(value);
+            if (value && Visible && IsHandleCreated && !ExpandedCanvas) ResizeImage(ImageScale, true);
+        }
         protected override void OnVisibleChanged(EventArgs e) { base.OnVisibleChanged(e); LayoutToolbar(); }
         protected override void OnResize(EventArgs e) { base.OnResize(e); HideTextSelection(); LayoutViewport(); LayoutOverlays(); }
         private void OriginalSize()
@@ -209,7 +214,7 @@ namespace SnapTransOCR
         private void ResizeImage(double scale, bool keepLocation = false)
         {
             MinimumSize = ImageSize(Math.Min(1, 80d / Math.Max(DisplaySize.Width, DisplaySize.Height)));
-            ClientSize = ConstrainedSize(scale);
+            Size = ConstrainedSize(scale);
             LayoutViewport(); LayoutOverlays();
             if (!Ui.RenderOffscreen && !preserveLocation && !keepLocation)
             {
@@ -255,6 +260,8 @@ namespace SnapTransOCR
         }
         protected override void WndProc(ref Message message)
         {
+            // Image geometry already has explicit limits; the generic Form handler imposes caption-size minimums.
+            if (message.Msg == 0x46) { message.Result = IntPtr.Zero; return; }
             if (message.Msg == 0x31e) ApplyShadow(); // Reapply when desktop composition changes.
             if (message.Msg == 0xa1) HideTextSelection();
             if (message.Msg == 0xa5)

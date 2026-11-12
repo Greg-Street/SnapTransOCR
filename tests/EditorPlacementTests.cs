@@ -23,6 +23,8 @@ namespace SnapTransOCR
                     check(editor.IsHandleCreated && !editor.Visible && work.Contains(editor.Bounds), "history editor positions its native window before first showing it within the actual monitor");
                     check(settings.Bounds == original && editor.Owner == null && !editor.TopMost, "positioning a history editor neither moves settings nor forces the editor above it");
                     check(editor.StartPosition == FormStartPosition.Manual && editor.Width == editor.MinimumSize.Width, "a small history image uses the toolbar minimum width instead of a fixed large preview");
+                    settings.TopMost = true; EditorPlacement.Place(editor, settings);
+                    check(editor.TopMost && editor.Bounds.IntersectsWith(settings.Bounds), "a history editor stays visible above a pinned history window when they overlap");
                 }
                 foreach (Size image in new[] { new Size(180, 100), new Size(900, 120), new Size(120, 900), new Size(2400, 1600) })
                 using (var editor = new EditorForm(new Bitmap(image.Width, image.Height)))
@@ -58,22 +60,22 @@ namespace SnapTransOCR
             {
                 Func<int, int> s = value => (int)Math.Round(value * dpi / 96.0);
                 var work = new Rectangle(-s(500), -s(100), s(1920), s(1040));
-                var preferred = new Size(s(800), s(560)); var minimum = new Size(s(720), s(420));
+                var preferred = new Size(s(800), s(560));
                 Func<Size, Size> fit = space => new Size(Math.Min(space.Width, preferred.Width), Math.Min(space.Height, preferred.Height));
                 var left = new Rectangle(work.Left + s(20), work.Top + s(40), s(1000), s(730));
                 var right = new Rectangle(work.Right - s(1020), work.Top + s(40), s(1000), s(730));
-                Rectangle result = EditorPlacement.Calculate(work, left, minimum, s(12), fit);
-                check(work.Contains(result) && !result.IntersectsWith(left) && result.Left > left.Right, "history editor uses free space to the right at " + dpi + " DPI");
-                result = EditorPlacement.Calculate(work, right, minimum, s(12), fit);
-                check(work.Contains(result) && !result.IntersectsWith(right) && result.Right < right.Left, "history editor uses free space to the left at " + dpi + " DPI");
+                Rectangle result = EditorPlacement.Calculate(work, left, s(12), fit);
+                check(work.Contains(result) && result.Size == preferred && result.IntersectsWith(left) && result.Location == new Point(left.Left + s(12), left.Top + s(12)), "history editor retains image-based size and opens slightly offset over the history window at " + dpi + " DPI");
+                result = EditorPlacement.Calculate(work, right, s(12), fit);
+                check(work.Contains(result) && result.Size == preferred && result.IntersectsWith(right), "history editor can overlap a right-aligned history window without shrinking at " + dpi + " DPI");
                 var centered = new Rectangle(work.Left + s(460), work.Top + s(100), s(1000), s(730));
-                result = EditorPlacement.Calculate(work, centered, minimum, s(12), fit);
-                check(work.Contains(result) && result.Left >= centered.Left + centered.Width / 2, "compact history editor leaves the navigation and list visible when side by side does not fit at " + dpi + " DPI");
+                result = EditorPlacement.Calculate(work, centered, s(12), fit);
+                check(work.Contains(result) && result.Size == preferred && result.Location == new Point(centered.Left + s(12), centered.Top + s(12)), "centered history no longer reduces the image to make side-by-side space at " + dpi + " DPI");
                 var tallWork = new Rectangle(-s(1920), -s(1200), s(1920), s(2200));
-                result = EditorPlacement.Calculate(tallWork, new Rectangle(tallWork.Left, tallWork.Top, tallWork.Width, s(730)), minimum, s(12), fit);
-                check(tallWork.Contains(result) && result.Top >= tallWork.Top + s(742), "history editor can use vertical free space on a negative-coordinate monitor at " + dpi + " DPI");
+                result = EditorPlacement.Calculate(tallWork, new Rectangle(tallWork.Left, tallWork.Top, tallWork.Width, s(730)), s(12), fit);
+                check(tallWork.Contains(result) && result.Top == tallWork.Top + s(12), "history editor uses a small offset on a negative-coordinate monitor at " + dpi + " DPI");
                 var small = new Rectangle(-s(900), 0, s(640), s(360));
-                result = EditorPlacement.Calculate(small, small, minimum, s(12), fit);
+                result = EditorPlacement.Calculate(small, small, s(12), fit);
                 check(small.Contains(result) && result.Size == small.Size, "history editor stays inside a work area smaller than its usual minimum at " + dpi + " DPI");
                 Size available = new Size(s(1920), s(1040)), chrome = new Size(s(46), s(150)), compactMinimum = new Size(s(560), s(320));
                 foreach (Size image in new[] { new Size(1, 1), new Size(180, 100), new Size(900, 120), new Size(120, 900), new Size(10000, 1000), new Size(1000, 10000) })

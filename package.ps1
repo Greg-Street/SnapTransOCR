@@ -1,7 +1,7 @@
-param([string]$Destination = (Join-Path (Split-Path $PSScriptRoot -Parent) 'output\SnapTransOCR-0.2.21'))
+param([string]$Destination = (Join-Path (Split-Path $PSScriptRoot -Parent) 'output\SnapTransOCR-0.2.29'))
 $ErrorActionPreference = 'Stop'
 $projectPath = $PSScriptRoot
-$portableName = 'SnapTransOCR-0.2.21-win-x64'
+$portableName = 'SnapTransOCR-0.2.29-win-x64'
 $destinationPath = [IO.Path]::GetFullPath($Destination)
 $portablePath = Join-Path $destinationPath $portableName
 $stagingPath = Join-Path $destinationPath ('.package-' + [Guid]::NewGuid().ToString('N'))
@@ -25,10 +25,17 @@ SnapTransOCR
 
 运行 SnapTransOCR.exe，程序默认留在系统托盘。
 Alt+1：截图、标注、OCR 和翻译。
+截图期间按 F2 切换指针显示，F1 显示或隐藏左下角快捷键提示，也可点击提示右上角关闭。
+截图设置可选择 1–12 像素选区边框，并保存指针和操作提示的默认状态。
 Ctrl+Shift+A：划词翻译。Ctrl+Shift+S：历史 / 剪贴板。
+历史窗口按 Esc 关闭，顶部图钉置顶，Ctrl+F 搜索；七种筛选直接点击切换。
+GIF：托盘或截图工具栏胶片图标进入，F9 开始、F8 停止保存、Esc 取消。
+开始前可选画质：省空间（默认）、均衡、清晰、原尺寸；开始时记住选择。
+长截图支持向上、向下及来回滚动，显示范围边框、实时预览与累计尺寸。
+F9 手动捕获，F8 完成。重叠不足时回滚一点补取画面后继续。
 右键托盘打开设置，按需填写并启用自己的 API 服务。
 
-固定安装目录：%LOCALAPPDATA%\Programs\SnapTransOCR。
+默认安装到 %LOCALAPPDATA%\Programs\SnapTransOCR；-Destination 可指定专用目录。
 如包内提供 install.ps1，可在 PowerShell 中运行 .\install.ps1 安装或更新。
 历史数据优先保存在程序目录 data\history；移动程序时请一并保留 data。
 常规设置 → 历史保存天数：直接输入保存天数，默认 7 天，保存后生效。
@@ -44,7 +51,7 @@ API 配置保存在 %LOCALAPPDATA%\SnapTransOCR\settings.json。
     if ((Test-Path -LiteralPath $portablePath) -and ((Get-Item -LiteralPath $portablePath).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Portable output directory must not be a reparse point.' }
     New-Item -ItemType Directory -Force -Path $portablePath | Out-Null
     foreach ($file in Get-ChildItem -LiteralPath $stagedPortable -File) { Copy-Item -LiteralPath $file.FullName -Destination $portablePath -Force }
-    $sourceZip = Join-Path $destinationPath 'SnapTransOCR-0.2.21-source.zip'
+    $sourceZip = Join-Path $destinationPath 'SnapTransOCR-0.2.29-source.zip'
     $sourceNames = @('src','tests','assets','docs','build.ps1','make-icon.ps1','package.ps1','README.md','LICENSE','NOTICE.md','.gitignore')
     if (Test-Path -LiteralPath $installScript) { $sourceNames += 'install.ps1' }
     $sourceItems = $sourceNames | ForEach-Object { Join-Path $projectPath $_ }

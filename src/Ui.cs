@@ -24,7 +24,7 @@ namespace SnapTransOCR
         }
         public static Button Button(string text, Action action, bool primary = false)
         {
-            var button = new Button { Text = text, AutoSize = true, MinimumSize = new Size(84, 34), Padding = new Padding(10, 3, 10, 3), FlatStyle = FlatStyle.Flat, BackColor = primary ? Accent : Color.White, ForeColor = primary ? Color.White : Ink, Cursor = Cursors.Hand, Margin = new Padding(4) };
+            var button = new RoundedButton { Text = text, AutoSize = true, MinimumSize = new Size(84, 34), Padding = new Padding(10, 3, 10, 3), FlatStyle = FlatStyle.Flat, BackColor = primary ? Accent : Color.White, ForeColor = primary ? Color.White : Ink, Cursor = Cursors.Hand, Margin = new Padding(4) };
             button.FlatAppearance.BorderColor = primary ? Accent : Color.FromArgb(219, 226, 231);
             button.Click += delegate { action(); };
             return button;
@@ -43,7 +43,7 @@ namespace SnapTransOCR
         public static int Scale(Control control, int value) { return (int)Math.Round(value * control.DeviceDpi / 96.0); }
         public static Button TextAction(string text, Action action)
         {
-            var button = new Button { Text = text, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Ink, Cursor = Cursors.Hand, Font = new Font("Microsoft YaHei UI", 9F), AutoSize = false };
+            var button = new RoundedButton { Text = text, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Ink, Cursor = Cursors.Hand, Font = new Font("Microsoft YaHei UI", 9F), AutoSize = false };
             button.FlatAppearance.BorderSize = 0;
             button.Click += delegate { action(); };
             return button;

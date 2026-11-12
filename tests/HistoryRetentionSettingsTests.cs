@@ -24,12 +24,14 @@ namespace SnapTransOCR
                 AppSettings saved = null;
                 using (var form = new SettingsForm(initial, next => saved = next.Copy(), new HistoryStore(Path.Combine(directory, "history"))))
                 {
-                    var input = (NumericUpDown)typeof(SettingsForm).GetField("historyRetention", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form);
-                    check(input.Minimum == 1 && input.Maximum == 3650 && input.Value == 7, "retention control permits direct input from one to 3650 days");
-                    check(input.Parent is RetentionInput && input.BorderStyle == BorderStyle.None, "retention input uses the shared rounded style without a native rectangle border");
+                    var input = (RetentionInput)typeof(SettingsForm).GetField("historyRetention", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(form);
+                    check(RetentionInput.Minimum == 1 && RetentionInput.Maximum == 3650 && input.Value == 7, "retention control permits direct input from one to 3650 days");
+                    TextBox editor = null;
+                    foreach (Control control in input.Controls) if (control is TextBox) editor = (TextBox)control;
+                    check(editor != null && editor.BorderStyle == BorderStyle.None, "retention input uses a borderless direct text editor with no native spinner child");
                     input.Value = 23;
                     GlyphButton more = null, less = null;
-                    foreach (Control control in input.Parent.Controls)
+                    foreach (Control control in input.Controls)
                     {
                         if (control is GlyphButton && control.AccessibleName == "增加一天") more = (GlyphButton)control;
                         if (control is GlyphButton && control.AccessibleName == "减少一天") less = (GlyphButton)control;

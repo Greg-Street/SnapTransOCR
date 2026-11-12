@@ -130,6 +130,23 @@ namespace SnapTransOCR
             CommitText();
             return Render(Crop);
         }
+        internal void UpdateBackground(Image patch, Point location)
+        {
+            using (var graphics = Graphics.FromImage(image))
+            {
+                graphics.CompositingMode = CompositingMode.SourceCopy;
+                graphics.DrawImageUnscaled(patch, location);
+            }
+            InvalidateImageRectangle(new RectangleF(location, patch.Size));
+        }
+        private void InvalidateImageRectangle(RectangleF bounds)
+        {
+            Rectangle crop = Crop;
+            bounds = new RectangleF(pan.X + (bounds.X - crop.X) * zoom, pan.Y + (bounds.Y - crop.Y) * zoom, bounds.Width * zoom, bounds.Height * zoom);
+            bounds.Inflate(2, 2);
+            Rectangle dirty = Rectangle.Intersect(ClientRectangle, Rectangle.Ceiling(bounds));
+            if (dirty.Width > 0 && dirty.Height > 0) Invalidate(dirty);
+        }
         private Bitmap Render(Rectangle region)
         {
             var result = new Bitmap(region.Width, region.Height, PixelFormat.Format24bppRgb);
@@ -158,7 +175,7 @@ namespace SnapTransOCR
             e.Graphics.TranslateTransform(pan.X, pan.Y);
             e.Graphics.ScaleTransform(zoom, zoom);
             e.Graphics.TranslateTransform(-crop.X, -crop.Y);
-            e.Graphics.SetClip(crop);
+            e.Graphics.SetClip(crop, CombineMode.Intersect);
             Draw(e.Graphics);
             if (current != null)
             {
@@ -194,7 +211,7 @@ namespace SnapTransOCR
                 BeginText(point);
                 return;
             }
-            current = new Mark { Kind = Tool, First = point, Last = point, Color = Color, Width = Stroke };
+            current = new Mark { Kind = Tool, First = point, Last = point, Bounds = new RectangleF(point, SizeF.Empty), Color = Color, Width = Stroke };
             current.Points.Add(point);
             Capture = true;
         }
@@ -202,10 +219,14 @@ namespace SnapTransOCR
         {
             if (panning) { pan = new PointF(panStart.X + e.X - dragStart.X, panStart.Y + e.Y - dragStart.Y); Invalidate(); return; }
             if (current == null) return;
+            RectangleF previous = current.Kind == Tool.Pen ? new RectangleF(current.Last, SizeF.Empty) : current.Bounds;
             current.Last = ImagePoint(e.Location);
             current.Bounds = RectangleF.FromLTRB(Math.Min(current.First.X, current.Last.X), Math.Min(current.First.Y, current.Last.Y), Math.Max(current.First.X, current.Last.X), Math.Max(current.First.Y, current.Last.Y));
             if (current.Kind == Tool.Pen) current.Points.Add(current.Last);
-            Invalidate();
+            RectangleF dirty = RectangleF.Union(previous, current.Kind == Tool.Pen ? new RectangleF(current.Last, SizeF.Empty) : current.Bounds);
+            float padding = Math.Max(3 / zoom, current.Width * (current.Kind == Tool.Arrow ? 7 : 1));
+            dirty.Inflate(padding, padding);
+            InvalidateImageRectangle(dirty);
         }
         protected override void OnMouseUp(MouseEventArgs e)
         {

@@ -52,6 +52,15 @@ namespace SnapTransOCR
                     using (var same = new ClipboardContent { Image = (Bitmap)content.Image.Clone() }) check(before == same.Hash(), "clipboard image hash is stable for identical pixels");
                 }
             }
+            var fetched = new Bitmap(20, 10);
+            using (var graphics = Graphics.FromImage(fetched)) graphics.Clear(Color.Navy);
+            var fetchedData = new DataObject(); fetchedData.SetData(DataFormats.Bitmap, false, fetched);
+            using (var content = ClipboardContent.Read(fetchedData, ownsImage: true))
+            {
+                bool fetchedReleased = false;
+                try { fetched.GetPixel(0, 0); } catch (ArgumentException) { fetchedReleased = true; }
+                check(fetchedReleased && content.Image.GetPixel(0, 0).ToArgb() == Color.Navy.ToArgb(), "system clipboard image ownership releases the fetched native bitmap immediately while retaining independent history pixels");
+            }
             int releases = 0;
             Action released = delegate { releases++; };
             ClipboardRecording.Released += released;
@@ -158,10 +167,9 @@ namespace SnapTransOCR
                 Bitmap saved = records.Length > 0 ? await store.LoadImageAsync(records[0].Id) : null;
                 using (saved) check(records.Length == 3 && records[0].Kind == "clipboard_image" && saved != null && saved.Size == new Size(32, 18) && saved.GetPixel(8, 8).ToArgb() == Color.Teal.ToArgb(), "native image clipboard is saved as independently readable PNG history");
                 await WriteFixture(delegate { Clipboard.SetText("final pending clipboard fixture"); }); owned = Native.GetClipboardSequenceNumber();
-                Application.DoEvents();
                 monitor.Dispose(); await monitor.FlushAsync();
                 records = await store.LoadAsync();
-                check(records.Length == 4 && records[0].Source == "final pending clipboard fixture", "disposing before the debounce timer saves the final notified clipboard item and flushes writes in order");
+                check(records.Length == 4 && records[0].Source == "final pending clipboard fixture", "disposing immediately after copying saves the final clipboard value even before notification dispatch and flushes writes in order");
                 await WriteFixture(delegate { Clipboard.SetText("after disposal fixture"); }); owned = Native.GetClipboardSequenceNumber();
                 await Task.Delay(230);
                 check((await store.LoadAsync()).Length == 4 && errors.Count == 0, "disposing clipboard monitor stops notifications and finishes writes without errors");

@@ -54,6 +54,7 @@ namespace SnapTransOCR
         private bool historyTopmost;
         private EditorForm historyEditor;
         private ScrollForm scroll;
+        private GifRecorderForm recorder;
         public DesktopApp(AppSettings initial, bool hidden, string startupWarning = null, Action<AppSettings> persistSettings = null, bool startClipboardHistory = false)
         {
             settings = initial;
@@ -104,6 +105,7 @@ namespace SnapTransOCR
             menu.Items.Add("延时 3 秒截图", null, async delegate { await Capture(0, 3000); });
             menu.Items.Add("延时 5 秒截图", null, async delegate { await Capture(0, 5000); });
             menu.Items.Add("滚动长截图", null, async delegate { await Capture(3, 0); });
+            menu.Items.Add("录制 GIF 动图", null, async delegate { await Capture(5, 0); });
             menu.Items.Add("剪贴板贴图", null, delegate { ClipboardPin(); });
             menu.Items.Add("剪贴板 OCR", null, delegate { ClipboardOcr(); });
             menu.Items.Add(new ToolStripSeparator());
@@ -242,6 +244,7 @@ namespace SnapTransOCR
                 next.PreserveLiveLanguages(original, settings);
                 next.PreserveLiveWindowSize(settings);
                 next.PreserveLiveAnnotationStyle(original, settings);
+                next.GifQuality = settings.GifQuality;
                 if (next.HistoryEnabled == original.HistoryEnabled) next.HistoryEnabled = settings.HistoryEnabled;
                 ApplySettings(next);
                 original = next.Copy();
@@ -273,7 +276,7 @@ namespace SnapTransOCR
             try
             {
                 bool saved = await history.AddAsync(new HistoryEntry { Kind = kind, Source = source, Translation = translated,
-                    OcrProvider = image == null ? "" : snapshot.OcrProvider, TranslateProvider = String.IsNullOrEmpty(translated) ? "" : snapshot.TranslateProvider }, image);
+                    OcrProvider = image == null ? "" : snapshot.OcrProvider, TranslateProvider = String.IsNullOrEmpty(translated) ? "" : snapshot.TranslateProvider == "ark" ? "ark:" + snapshot.ArkModel : snapshot.TranslateProvider }, image);
                 if (!exiting && settingsWindow != null) settingsWindow.RefreshHistoryEntries();
                 return saved ? "" : "已完成，内容超过历史记录容量，未保存历史。";
             }
@@ -314,7 +317,7 @@ namespace SnapTransOCR
 
         private async Task Capture(int mode, int delay)
         {
-            if (capturing || scroll != null || exiting) return;
+            if (capturing || scroll != null || recorder != null || exiting) return;
             capturing = true;
             main.CaptureInProgress = true;
             try
@@ -327,7 +330,7 @@ namespace SnapTransOCR
                 if (exiting) return;
                 // Let the invoking menu finish closing; keep application windows in the captured desktop.
                 Native.DwmFlush();
-                using (var capture = new CaptureForm(mode == 3 ? "框选滚动内容区域" : "截图 / OCR", settings.Copy(), mode))
+                using (var capture = new CaptureForm(mode == 3 ? "框选滚动内容区域" : mode == 5 ? "框选 GIF 录制区域" : "截图 / OCR", settings.Copy(), mode))
                 {
                     AnnotationStyle originalStyle = capture.Style;
                     DialogResult result = capture.ShowDialog();
@@ -348,6 +351,18 @@ namespace SnapTransOCR
                         }
                         finally { image.Dispose(); }
                     }
+                    else if (capture.Action == CaptureAction.Gif)
+                    {
+                        recorder = new GifRecorderForm(capture.ScreenRegion, initialQuality: settings.GifQuality, rememberQuality: quality =>
+                        {
+                            if (settings.GifQuality == quality) return;
+                            settings.GifQuality = quality;
+                            try { SaveSettings(settings); }
+                            catch (Exception ex) { main.SetStatus("GIF 画质未保存（" + ex.GetType().Name + "）。"); }
+                        });
+                        recorder.FormClosed += delegate { recorder = null; main.CaptureInProgress = false; };
+                        recorder.Show();
+                    }
                     else if (capture.Action == CaptureAction.Ocr || capture.Action == CaptureAction.Translate) { var task = Ocr(image, capture.Action == CaptureAction.Translate); }
                     else if (capture.Action == CaptureAction.Handwriting || capture.Action == CaptureAction.QrCode || capture.Action == CaptureAction.Table || capture.Action == CaptureAction.BaiduTable)
                     {
@@ -361,7 +376,7 @@ namespace SnapTransOCR
             finally
             {
                 capturing = false;
-                if (scroll == null) main.CaptureInProgress = false;
+                if (scroll == null && recorder == null) main.CaptureInProgress = false;
             }
         }
         private async Task CompleteCapture(Bitmap image, CaptureAction action, Point? location = null)
@@ -663,17 +678,15 @@ namespace SnapTransOCR
                 if (!current()) return;
                 setSource(text);
                 if (String.IsNullOrWhiteSpace(text)) { setStatus("未识别到文字，耗时 " + watch.ElapsedMilliseconds + " ms"); return; }
-                string translation = "";
                 if (translate)
                 {
                     stage = "翻译";
                     main.SetStatus("OCR 完成，正在翻译…");
-                    translation = await Task.Run(() => api.Translate(snapshot, text, cancellation.Token), cancellation.Token);
-                    cancellation.Token.ThrowIfCancellationRequested();
-                    if (!current()) return;
-                    main.SetOutput(translation);
+                    string translatedStatus = await TranslateAndShow(snapshot, text, cancellation.Token, stamp, null, image);
+                    if (current()) setStatus(translatedStatus);
+                    return;
                 }
-                string historyStatus = await RecordHistory(snapshot, translate ? "translation" : "ocr", text, translation, image);
+                string historyStatus = await RecordHistory(snapshot, "ocr", text, "", image);
                 if (current()) setStatus(historyStatus);
             }
             catch (OperationCanceledException) { if (current()) setStatus("请求已取消"); }
@@ -695,25 +708,47 @@ namespace SnapTransOCR
             int stamp;
             var cancellation = BeginJob(out stamp);
             AppSettings snapshot = settings.Copy();
-            var watch = Stopwatch.StartNew();
-            if (provider != null) snapshot.TranslateProvider = provider;
-            main.SetActiveProvider(snapshot.TranslateProvider);
             main.SetSource(text);
             main.SetStatus("正在翻译…");
             try
             {
-                string result = await api.Translate(snapshot, text, cancellation.Token);
-                cancellation.Token.ThrowIfCancellationRequested();
-                if (stamp == version && !exiting)
-                {
-                    main.SetOutput(result); main.SetStatus("");
-                    string historyStatus = await RecordHistory(snapshot, "translation", text, result);
-                    if (stamp == version && !exiting) main.SetStatus(historyStatus);
-                }
+                string result = await TranslateAndShow(snapshot, text, cancellation.Token, stamp, provider);
+                if (stamp == version && !exiting) main.SetStatus(result);
             }
             catch (OperationCanceledException) { if (stamp == version && !exiting) main.SetStatus("请求已取消"); }
             catch (Exception ex) { if (stamp == version && !exiting) { main.SetStatus("翻译未完成"); Ui.Error(main, ex); } }
             finally { if (!exiting) EndJob(cancellation, stamp); else cancellation.Dispose(); }
+        }
+        private async Task<string> TranslateAndShow(AppSettings snapshot, string text, CancellationToken cancellation, int stamp, string requested = null, Bitmap image = null)
+        {
+            string[] providers = requested == null ? snapshot.TranslationRequests() : new[] { requested };
+            main.SetActiveProvider(requested ?? snapshot.TranslateProvider);
+            foreach (string provider in providers) main.SetNotice(provider, "正在翻译…");
+            var results = await Task.WhenAll(providers.Select(async provider =>
+            {
+                try
+                {
+                    AppSettings selected = snapshot.ForTranslation(provider);
+                    string value = await Task.Run(() => api.Translate(selected, text, cancellation), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+                    if (stamp != version || exiting) return "";
+                    main.SetOutput(value, provider);
+                    return await RecordHistory(selected, "translation", text, value, provider == snapshot.TranslateProvider ? image : null);
+                }
+                catch (OperationCanceledException)
+                {
+                    if (stamp == version && !exiting) main.SetNotice(provider, "请求已取消，单击重新翻译");
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    if (stamp == version && !exiting)
+                        main.SetNotice(provider, ex is InvalidOperationException ? ex.Message : "翻译未完成（" + ex.GetType().Name + "），单击重试");
+                    return "部分翻译未完成，可点击对应模型重试";
+                }
+            }));
+            cancellation.ThrowIfCancellationRequested();
+            return String.Join("；", results.Where(value => value.Length > 0).Distinct());
         }
         private async Task SelectedTranslation()
         {
@@ -754,6 +789,7 @@ namespace SnapTransOCR
             try { history.FlushAsync().GetAwaiter().GetResult(); } catch (Exception) { } // Preserve the original file on an unreadable store and allow exit.
             foreach (var window in imageWindows.ToArray()) window.Close();
             if (scroll != null) scroll.Close();
+            if (recorder != null) recorder.Close();
             tray.Visible = false;
             main.Exiting = true;
             main.Close();

@@ -48,12 +48,14 @@ namespace SnapTransOCR
         {
             int last = previous.Length - 1;
             if (Char.IsLowSurrogate(previous[last]) && last > 0 && Char.IsHighSurrogate(previous[last - 1])) last--;
-            if (IsCjk(Char.ConvertToUtf32(previous, last)) || IsCjk(Char.ConvertToUtf32(next, 0))) return false;
+            int previousCode = last + 1 < previous.Length ? Char.ConvertToUtf32(previous, last) : previous[last];
+            int nextCode = Char.IsSurrogatePair(next, 0) ? Char.ConvertToUtf32(next, 0) : next[0];
+            if (IsCjk(previousCode) || IsCjk(nextCode)) return false;
             return "([{“‘-".IndexOf(previous[previous.Length - 1]) < 0 && ".,!?;:%)]}”’".IndexOf(next[0]) < 0;
         }
         private static bool IsCjk(int code)
         {
-            return code >= 0x2E80 && code <= 0x9FFF || code >= 0xAC00 && code <= 0xD7AF || code >= 0xF900 && code <= 0xFAFF || code >= 0xFE30 && code <= 0xFE4F || code >= 0x20000 && code <= 0x323AF || "，。！？：；、（）【】《》".IndexOf((char)code) >= 0;
+            return code >= 0x2E80 && code <= 0x9FFF || code >= 0xAC00 && code <= 0xD7AF || code >= 0xF900 && code <= 0xFAFF || code >= 0xFE30 && code <= 0xFE4F || code >= 0x20000 && code <= 0x323AF || code <= Char.MaxValue && "，。！？：；、（）【】《》".IndexOf((char)code) >= 0;
         }
     }
 

@@ -223,6 +223,43 @@ namespace SnapTransOCR
         }
     }
 
+    internal sealed class RoundedButton : Button
+    {
+        private bool hover, pressed;
+        internal RoundedButton()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            UseVisualStyleBackColor = false;
+        }
+        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); hover = true; Invalidate(); }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hover = pressed = false; Invalidate(); }
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (e.Button == MouseButtons.Left) { pressed = true; Invalidate(); } }
+        protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); pressed = false; Invalidate(); }
+        protected override void OnMouseCaptureChanged(EventArgs e) { base.OnMouseCaptureChanged(e); if (!Capture) { pressed = false; Invalidate(); } }
+        protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); if (e.KeyCode == Keys.Space) { pressed = true; Invalidate(); } }
+        protected override void OnKeyUp(KeyEventArgs e) { base.OnKeyUp(e); pressed = false; Invalidate(); }
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+        protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); pressed = false; Invalidate(); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var panel = Parent as RoundedPanel;
+            e.Graphics.Clear(panel != null ? panel.Fill : Parent == null ? Ui.Background : Parent.BackColor);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            Color fill = !Enabled ? Ui.Background : pressed ? ControlPaint.Dark(BackColor, .08f) : hover ? ControlPaint.Light(BackColor, .08f) : BackColor;
+            using (var path = Shapes.Round(new RectangleF(.5f, .5f, Width - 1, Height - 1), Ui.Scale(this, 8)))
+            using (var brush = new SolidBrush(fill))
+            {
+                e.Graphics.FillPath(brush, path);
+                if (FlatAppearance.BorderSize > 0)
+                    using (var pen = new Pen(Enabled ? FlatAppearance.BorderColor : Color.FromArgb(220, 222, 227))) e.Graphics.DrawPath(pen, path);
+                if (Focused && ShowFocusCues)
+                    using (var focus = Shapes.Round(new RectangleF(3, 3, Math.Max(1, Width - 6), Math.Max(1, Height - 6)), Ui.Scale(this, 6)))
+                    using (var pen = new Pen(ForeColor) { DashStyle = DashStyle.Dot }) e.Graphics.DrawPath(pen, focus);
+            }
+            TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, Enabled ? ForeColor : Ui.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+        }
+    }
+
     internal sealed class ToggleSwitch : CheckBox
     {
         public ToggleSwitch()
@@ -296,6 +333,7 @@ namespace SnapTransOCR
                     case "ocr": g.DrawLines(p, new[] { new Point(3, 8), new Point(3, 3), new Point(8, 3) }); g.DrawLines(p, new[] { new Point(16, 3), new Point(21, 3), new Point(21, 8) }); g.DrawLines(p, new[] { new Point(21, 16), new Point(21, 21), new Point(16, 21) }); g.DrawLines(p, new[] { new Point(8, 21), new Point(3, 21), new Point(3, 16) }); g.DrawLine(p, 8, 9, 16, 9); g.DrawLine(p, 12, 9, 12, 17); break;
                     case "save": g.DrawRectangle(p, 4, 3, 16, 18); g.DrawRectangle(p, 8, 3, 8, 6); g.DrawRectangle(p, 8, 14, 8, 7); break;
                     case "scroll": g.DrawRectangle(p, 5, 2, 14, 20); g.DrawLine(p, 12, 6, 12, 18); g.DrawLines(p, new[] { new Point(8, 14), new Point(12, 18), new Point(16, 14) }); break;
+                    case "gif": g.DrawRectangle(p, 2, 4, 20, 16); g.DrawEllipse(p, 9, 9, 6, 6); g.DrawLine(p, 5, 4, 5, 20); g.DrawLine(p, 19, 4, 19, 20); break;
                     case "swap": g.DrawLine(p, 3, 8, 20, 8); g.DrawLines(p, new[] { new Point(16, 4), new Point(20, 8), new Point(16, 12) }); g.DrawLine(p, 21, 16, 4, 16); g.DrawLines(p, new[] { new Point(8, 12), new Point(4, 16), new Point(8, 20) }); break;
                     case "chevron": g.DrawLines(p, new[] { new Point(6, 9), new Point(12, 15), new Point(18, 9) }); break;
                     case "stop": g.FillRectangle(b, 6, 6, 12, 12); break;

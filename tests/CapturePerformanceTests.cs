@@ -41,7 +41,7 @@ namespace SnapTransOCR
                 using (retained)
                 {
                     using (var expectedFrame = (Bitmap)retained.Clone())
-                    using (var overlay = new CaptureForm("", new AppSettings { CaptureMagnifier = false }, 0, (Bitmap)retained.Clone(), fixture.Bounds))
+                    using (var overlay = new CaptureForm("", new AppSettings { CaptureMagnifier = false, CaptureShortcutHints = false }, 0, (Bitmap)retained.Clone(), fixture.Bounds))
                     {
                         using (var graphics = Graphics.FromImage(expectedFrame))
                         using (var shade = new SolidBrush(Color.FromArgb(115, 10, 13, 20))) graphics.FillRectangle(shade, 0, 0, expectedFrame.Width, expectedFrame.Height);
@@ -197,7 +197,7 @@ namespace SnapTransOCR
                 }
             }
         }
-        private static bool SamePixels(Bitmap first, Bitmap second)
+        internal static bool SamePixels(Bitmap first, Bitmap second, int tolerance = 0)
         {
             Rectangle bounds = new Rectangle(Point.Empty, first.Size);
             BitmapData a = first.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
@@ -207,7 +207,9 @@ namespace SnapTransOCR
                 int length = a.Stride * first.Height;
                 var left = new byte[length]; var right = new byte[length];
                 Marshal.Copy(a.Scan0, left, 0, length); Marshal.Copy(b.Scan0, right, 0, length);
-                return left.SequenceEqual(right);
+                if (tolerance == 0) return left.SequenceEqual(right);
+                for (int index = 0; index < left.Length; index++) if (Math.Abs(left[index] - right[index]) > tolerance) return false;
+                return true;
             }
             finally { first.UnlockBits(a); second.UnlockBits(b); }
         }

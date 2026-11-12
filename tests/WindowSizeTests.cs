@@ -47,19 +47,20 @@ namespace SnapTransOCR
                     form.Location = new Point(form.Left + 20, form.Top + 20);
                     Native.SendMessage(form.Handle, 0x232, IntPtr.Zero, IntPtr.Zero);
                     check(writes == 0, "content height and moving the window do not persist a manual size");
-                    Resize(form, new Size(500, 620));
+                    Size requested = new Size(Ui.Scale(form, 500), Ui.Scale(form, 620));
+                    Resize(form, requested);
                     Native.SendMessage(form.Handle, 0x232, IntPtr.Zero, IntPtr.Zero);
                     check(writes == 1 && remembered.TranslateWindowWidth == 500 && remembered.TranslateWindowHeight == 620, "one completed user resize records the logical client size once");
                     form.SetSource("new source"); form.SetStatus(""); form.SetOutput("new output");
-                    check(form.ClientSize == new Size(500, 620) && writes == 1, "translation updates keep the remembered manual size without new writes");
+                    check(form.ClientSize == requested && writes == 1, "translation updates keep the remembered manual size without new writes");
                     using (var restarted = Open(remembered.Copy()))
                     {
                         restarted.SetOutput(new string('y', 2000));
-                        check(restarted.ClientSize == new Size(500, 620), "a recreated translation window restores manual width and height before results arrive");
+                        check(restarted.ClientSize == new Size(Ui.Scale(restarted, 500), Ui.Scale(restarted, 620)), "a recreated translation window restores manual width and height before results arrive");
                         remembered.TranslateAutoHeight = false; restarted.RefreshSettings(remembered);
                         var automatic = remembered.Copy(); automatic.TranslateAutoHeight = true; automatic.PreserveLiveWindowSize(remembered);
                         restarted.SetOutput(""); restarted.RefreshSettings(automatic);
-                        check(restarted.Width == 500 && restarted.Height < 620, "explicit auto height resumes after restart without widening the window");
+                        check(restarted.Width == Ui.Scale(restarted, 500) && restarted.Height < Ui.Scale(restarted, 620), "explicit auto height resumes after restart without widening the window");
                     }
                     ChangeDpi(form, 144);
                     check(form.Width == 750 && writes == 1, "DPI changes preserve logical width without persisting a resize");
